@@ -1,0 +1,7 @@
+•Build a peer to peer delivery marketplace app.
+•Requesters post shopping/delivery requests.
+•Deliverers bid or counteroffer.
+•Wallet holds funds until delivery confirmed.
+•Checklist ensures correct items.
+•OTP + photo proof for handover.
+•Ratings and reviews for both customers and delivery guys..
