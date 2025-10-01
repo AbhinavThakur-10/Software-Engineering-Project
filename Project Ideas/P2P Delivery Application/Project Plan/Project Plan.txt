@@ -1,6 +1,6 @@
 PROJECT PLAN:-
 
-Build a peer to peer delivery marketplace app.
+Build a peer to peer decentralised delivery marketplace app.
 Requesters post shopping/delivery requests.
 Deliverers bid or counteroffer.
 Wallet holds funds until delivery confirmed.
