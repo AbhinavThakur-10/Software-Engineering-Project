@@ -16,3 +16,10 @@ Checklist for items needed
 Bidding and negotiation (accept/counter with limits).
 Chat 
 Delivery proof (OTP + photo evidence).
+
+APPROACH:-
+- Frontend: Expo-based React Native app
+- Backend: Node.js (Express or NestJS)
+- Database: MySQL
+- Real-Time Communication: Socket.IO (Websockets for communication between the two parties)
+- Hosting/Deployment: Vercel for frontend, and MySQL/db platforms for backend
