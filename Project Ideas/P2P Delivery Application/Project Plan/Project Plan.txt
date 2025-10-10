@@ -23,3 +23,4 @@ APPROACH:-
 - Database: MySQL
 - Real-Time Communication: Socket.IO (Websockets for communication between the two parties)
 - Hosting/Deployment: Vercel for frontend, and MySQL/db platforms for backend
+
