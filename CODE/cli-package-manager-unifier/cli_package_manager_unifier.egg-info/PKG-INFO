@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: cli-package-manager-unifier
+Version: 1.0.0
+Summary: A unified CLI for managing npm and pip3 packages
+Author: Your Name
+Requires-Python: >=3.7
+Requires-Dist: colorama>=0.4.6
+Requires-Dist: tabulate>=0.9.0
+Requires-Dist: requests>=2.31.0
+Dynamic: author
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

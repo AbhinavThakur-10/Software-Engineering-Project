@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/docs/config.schema.json",
+  "typeCheckingMode": "basic",
+  "reportMissingParameterType": false,
+  "reportUnknownParameterType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "exclude": [
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/env/**",
+    "c:/Users/abhin/AppData/Local/Programs/Python/Python312/Lib/**"
+  ]
+}
