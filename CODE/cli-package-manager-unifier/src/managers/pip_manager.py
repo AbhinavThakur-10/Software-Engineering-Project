@@ -1,29 +1,22 @@
-"""
-Pip3 Package Manager implementation.
-"""
+"""Pip3 package manager implementation."""
 from typing import List, Dict
 import json
 import re
 from .base_manager import BasePackageManager
 
 class PipManager(BasePackageManager):
-    """Pip3 (Python Package Manager) implementation."""
+    """Pip3 manager."""
     
     def __init__(self):
         super().__init__(name="pip3", command="pip3")
     
     def list_packages(self) -> List[Dict[str, str]]:
-        """
-        List all installed pip packages.
-        
-        Returns:
-            List of dictionaries with package info (name, id, version, manager)
-        """
+        """Return installed pip packages."""
         try:
             result = self._run_command(['list', '--format=json'])
             
             if result.returncode != 0:
-                print(f"Warning: pip list returned non-zero exit code")
+                print("Warning: pip list returned non-zero exit code")
                 return []
             
             data = json.loads(result.stdout)
@@ -47,16 +40,7 @@ class PipManager(BasePackageManager):
             return []
     
     def install_package(self, package_name: str, upgrade: bool = False) -> bool:
-        """
-        Install a pip package.
-        
-        Args:
-            package_name: Name of the package to install
-            upgrade: Whether to upgrade if already installed (default: False)
-            
-        Returns:
-            True if successful, False otherwise
-        """
+        """Install a pip package; set upgrade=True to force upgrade."""
         try:
             args = ['install']
             if upgrade:
@@ -67,10 +51,10 @@ class PipManager(BasePackageManager):
             result = self._run_command(args, capture_output=False)
             
             if result.returncode == 0:
-                print(f"✓ Successfully installed {package_name}")
+                print(f"Successfully installed {package_name}")
                 return True
             else:
-                print(f"✗ Failed to install {package_name}")
+                print(f"Failed to install {package_name}")
                 return False
         
         except Exception as e:
@@ -78,15 +62,7 @@ class PipManager(BasePackageManager):
             return False
     
     def upgrade_package(self, package_name: str) -> bool:
-        """
-        Upgrade a pip package to the latest version.
-        
-        Args:
-            package_name: Name of the package to upgrade
-            
-        Returns:
-            True if successful, False otherwise
-        """
+        """Upgrade a pip package to latest."""
         try:
             args = ['install', '--upgrade', package_name]
             
@@ -94,10 +70,10 @@ class PipManager(BasePackageManager):
             result = self._run_command(args, capture_output=False)
             
             if result.returncode == 0:
-                print(f"✓ Successfully upgraded {package_name}")
+                print(f"Successfully upgraded {package_name}")
                 return True
             else:
-                print(f"✗ Failed to upgrade {package_name}")
+                print(f"Failed to upgrade {package_name}")
                 return False
         
         except Exception as e:
@@ -105,21 +81,10 @@ class PipManager(BasePackageManager):
             return False
     
     def search_package(self, query: str, limit: int = 10) -> List[Dict[str, str]]:
-        """
-        Search for pip packages using PyPI API.
-        Note: pip search was disabled, so we use PyPI API instead.
-        
-        Args:
-            query: Search query string
-            limit: Maximum number of results (default: 10)
-            
-        Returns:
-            List of matching packages with name, version, and description
-        """
+        """Search packages using PyPI APIs (warehouse fallback)."""
         try:
             import requests
             
-            # Use PyPI JSON API for search
             url = f"https://pypi.org/pypi/{query}/json"
             
             try:
@@ -134,7 +99,6 @@ class PipManager(BasePackageManager):
                         'manager': 'pip3'
                     }]
                 else:
-                    # Fallback: search using PyPI search API
                     return self._search_pypi_warehouse(query, limit)
             
             except requests.RequestException:
@@ -145,16 +109,7 @@ class PipManager(BasePackageManager):
             return []
     
     def _search_pypi_warehouse(self, query: str, limit: int) -> List[Dict[str, str]]:
-        """
-        Search PyPI using the warehouse search API.
-        
-        Args:
-            query: Search query string
-            limit: Maximum number of results
-            
-        Returns:
-            List of package dictionaries
-        """
+        """Search PyPI warehouse page and parse results (simple)."""
         try:
             import requests
             
@@ -164,11 +119,8 @@ class PipManager(BasePackageManager):
             response = requests.get(url, params=params, timeout=10)
             
             if response.status_code == 200:
-                # Parse HTML response (simplified)
-                # In production, you'd want to use BeautifulSoup for proper parsing
                 import re
                 
-                # Extract package names from search results
                 pattern = r'<a class="package-snippet".*?href="/project/(.*?)/"'
                 matches = re.findall(pattern, response.text)
                 
@@ -191,15 +143,7 @@ class PipManager(BasePackageManager):
             return []
     
     def uninstall_package(self, package_name: str) -> bool:
-        """
-        Uninstall a pip package.
-        
-        Args:
-            package_name: Name of the package to uninstall
-            
-        Returns:
-            True if successful, False otherwise
-        """
+        """Uninstall a pip package."""
         try:
             args = ['uninstall', '-y', package_name]
             
@@ -213,17 +157,12 @@ class PipManager(BasePackageManager):
             return False
     
     def check_outdated(self) -> List[Dict[str, str]]:
-        """
-        Check for outdated pip packages.
-        
-        Returns:
-            List of dictionaries with package update info
-        """
+        """Return outdated pip packages."""
         try:
             result = self._run_command(['list', '--outdated', '--format=json'])
             
             if result.returncode != 0:
-                print(f"Warning: pip list --outdated returned non-zero exit code")
+                print("Warning: pip list --outdated returned non-zero exit code")
                 return []
             
             if not result.stdout.strip():

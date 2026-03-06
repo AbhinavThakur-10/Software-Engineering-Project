@@ -1,30 +1,24 @@
-"""
-NPM Package Manager implementation.
-"""
+"""NPM package manager implementation."""
 from typing import List, Dict
 import json
 import subprocess
 from .base_manager import BasePackageManager
 
 class NPMManager(BasePackageManager):
-    """NPM (Node Package Manager) implementation."""
+    """NPM manager."""
 
     def __init__(self) -> None:
         super().__init__(name="npm", command="npm")
 
     def list_packages(self) -> List[Dict[str, str]]:
-        """
-        List all globally installed npm packages.
-        Returns:
-            List of dictionaries with package info (name, id, version, manager)
-        """
+        """Return globally installed npm packages."""
         try:
             result: subprocess.CompletedProcess[str] = self._run_command(
                 ['list', '-g', '--depth=0', '--json']
             )
 
             if result.returncode != 0:
-                print(f"Warning: npm list returned non-zero exit code")
+                print("Warning: npm list returned non-zero exit code")
                 return []
 
             data = json.loads(result.stdout)
@@ -47,9 +41,9 @@ class NPMManager(BasePackageManager):
             print(f"Error listing npm packages: {e}")
             return []
 
-    def install_package(self, package_name: str, global_install: bool = False) -> bool:
+    def install_package(self, package_name: str, global_install: bool = True) -> bool:
         """
-        Install an npm package.
+        Install an npm package (globally by default for consistency).
         """
         try:
             args = ['install']
@@ -61,10 +55,10 @@ class NPMManager(BasePackageManager):
             result: subprocess.CompletedProcess[str] = self._run_command(args, capture_output=False)
 
             if result.returncode == 0:
-                print(f"✓ Successfully installed {package_name}")
+                print(f"Successfully installed {package_name}")
                 return True
             else:
-                print(f"✗ Failed to install {package_name}")
+                print(f"Failed to install {package_name}")
                 return False
 
         except Exception as e:
@@ -72,9 +66,7 @@ class NPMManager(BasePackageManager):
             return False
     
     def upgrade_package(self, package_name: str, global_upgrade: bool = True) -> bool:
-        """
-        Upgrade an npm package to the latest version.
-        """
+        """Upgrade an npm package to latest."""
         try:
             args = ['update']
             if global_upgrade:
@@ -85,10 +77,10 @@ class NPMManager(BasePackageManager):
             result: subprocess.CompletedProcess[str] = self._run_command(args, capture_output=False)
 
             if result.returncode == 0:
-                print(f"✓ Successfully upgraded {package_name}")
+                print(f"Successfully upgraded {package_name}")
                 return True
             else:
-                print(f"✗ Failed to upgrade {package_name}")
+                print(f"Failed to upgrade {package_name}")
                 return False
 
         except Exception as e:
@@ -96,9 +88,7 @@ class NPMManager(BasePackageManager):
             return False
 
     def search_package(self, query: str, limit: int = 10) -> List[Dict[str, str]]:
-        """
-        Search for npm packages.
-        """
+        """Search npm packages."""
         try:
             result: subprocess.CompletedProcess[str] = self._run_command(['search', query, '--json'])
 
@@ -143,11 +133,7 @@ class NPMManager(BasePackageManager):
         return packages
 
     def check_outdated(self) -> List[Dict[str, str]]:
-        """
-        Check for outdated globally installed npm packages.
-        Returns:
-            List of dictionaries with package update info
-        """
+        """Return outdated globally installed npm packages."""
         try:
             result: subprocess.CompletedProcess[str] = self._run_command(
                 ['outdated', '-g', '--json']
@@ -155,7 +141,7 @@ class NPMManager(BasePackageManager):
 
             # npm outdated returns exit code 1 when there are outdated packages
             if result.returncode not in [0, 1]:
-                print(f"Warning: npm outdated returned unexpected exit code")
+                print("Warning: npm outdated returned unexpected exit code")
                 return []
 
             if not result.stdout.strip():
@@ -183,9 +169,7 @@ class NPMManager(BasePackageManager):
             return []
 
     def uninstall_package(self, package_name: str, global_uninstall: bool = False) -> bool:
-        """
-        Uninstall an npm package.
-        """
+        """Uninstall an npm package."""
         try:
             args = ['uninstall']
             if global_uninstall:

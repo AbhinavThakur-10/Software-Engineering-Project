@@ -1,6 +1,4 @@
-"""
-VirusTotal API integration for hash scanning.
-"""
+"""VirusTotal API helpers for hash scanning."""
 import os
 import hashlib
 import tempfile
@@ -10,23 +8,18 @@ import requests
 from typing import Optional, Dict, Any, cast
 from urllib.parse import quote
 
-VIRUSTOTAL_API_KEY_ENV = "VT_API_KEY"
+VIRUSTOTAL_API_KEY = "020700591df72dd76c943a1306d9de7a984cf4afbd5b3f868c723cf64f2413db"
 VIRUSTOTAL_API_URL = "https://www.virustotal.com/api/v3/files/{}"
 VIRUSTOTAL_SCAN_URL = "https://www.virustotal.com/api/v3/files"
 
 
 def get_virustotal_api_key() -> str:
-    """Get VirusTotal API key from environment variable or use default."""
-    key = os.environ.get(VIRUSTOTAL_API_KEY_ENV)
-    if not key:
-        # Use the provided API key
-        key = "020700591df72dd76c943a1306d9de7a984cf4afbd5b3f868c723cf64f2413db"
-        os.environ[VIRUSTOTAL_API_KEY_ENV] = key
-    return key
+    """Return VirusTotal API key configured in the module constant."""
+    return VIRUSTOTAL_API_KEY
 
 
 def scan_file_hash_with_virustotal(file_hash: str, api_key: str) -> Dict[str, Any]:
-    """Query VirusTotal for a file hash. Returns the scan result as dict."""
+    """Query VirusTotal for a file hash."""
     headers = {"x-apikey": api_key}
     url = VIRUSTOTAL_API_URL.format(file_hash)
     resp = requests.get(url, headers=headers)
@@ -37,7 +30,7 @@ def scan_file_hash_with_virustotal(file_hash: str, api_key: str) -> Dict[str, An
 
 
 def upload_file_to_virustotal(file_path: str, api_key: str) -> Dict[str, Any]:
-    """Upload a file to VirusTotal for scanning. Returns the scan result as dict."""
+    """Upload a file to VirusTotal for scanning."""
     headers = {"x-apikey": api_key}
     with open(file_path, "rb") as f:
         files = {"file": (os.path.basename(file_path), f)}
@@ -49,7 +42,7 @@ def upload_file_to_virustotal(file_path: str, api_key: str) -> Dict[str, Any]:
 
 
 def calculate_file_hash(file_path: str) -> str:
-    """Calculate SHA-256 hash of a file."""
+    """Return SHA-256 of a file."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
         for byte_block in iter(lambda: f.read(4096), b""):
@@ -58,7 +51,7 @@ def calculate_file_hash(file_path: str) -> str:
 
 
 def _download_pip_artifact(package_name: str, tmpdir: str) -> Optional[str]:
-    """Download a pip package (no dependencies) and return hash."""
+    """Download pip artifact (no deps) and return hash."""
     cmd = ['pip3', 'download', '--no-deps', package_name, '-d', tmpdir]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -74,7 +67,7 @@ def _download_pip_artifact(package_name: str, tmpdir: str) -> Optional[str]:
 
 
 def _get_npm_registry() -> str:
-    """Get npm registry URL (defaults to https://registry.npmjs.org/)."""
+    """Return npm registry URL (default https://registry.npmjs.org/)."""
     try:
         res = subprocess.run(['npm', 'config', 'get', 'registry'], capture_output=True, text=True)
         reg = res.stdout.strip()
@@ -86,7 +79,7 @@ def _get_npm_registry() -> str:
 
 
 def _get_npm_metadata(package_name: str) -> Optional[Dict[str, Any]]:
-    """Fetch npm metadata via npm view --json. Returns dict or None."""
+    """Fetch npm metadata via `npm view --json`."""
     try:
         res = subprocess.run(['npm', 'view', package_name, '--json'], capture_output=True, text=True)
         if res.returncode != 0 or not res.stdout.strip():
@@ -97,9 +90,7 @@ def _get_npm_metadata(package_name: str) -> Optional[Dict[str, Any]]:
         return None
 
 def _get_npm_latest_tarball_from_registry(package_name: str, registry: str) -> Optional[str]:
-    """Query the registry for latest version and return dist.tarball URL.
-    Handles scoped packages by URL-encoding the name.
-    """
+    """Return latest dist.tarball from registry (handles scopes)."""
     try:
         encoded = quote(package_name, safe='@/')
         url = f"{registry}{encoded}/latest"
@@ -118,7 +109,7 @@ def _get_npm_latest_tarball_from_registry(package_name: str, registry: str) -> O
 
 
 def _construct_npm_tarball_url(package_name: str, version: str, registry: str) -> str:
-    """Construct tarball URL from name/version/registry (handles scoped packages)."""
+    """Construct tarball URL from name/version/registry (handles scopes)."""
     if package_name.startswith('@'):
         # @scope/name -> registry@scope/name/-/name-version.tgz
         scope, name = package_name.split('/', 1)
@@ -129,7 +120,7 @@ def _construct_npm_tarball_url(package_name: str, version: str, registry: str) -
 
 
 def _download_npm_tarball(url: str, tmpdir: str, package_name: str) -> Optional[str]:
-    """Download npm tarball from URL and return hash."""
+    """Download npm tarball and return hash."""
     try:
         tgz_path = os.path.join(tmpdir, f"{package_name}.tgz")
         with requests.get(url, stream=True, timeout=30) as r:
@@ -145,7 +136,7 @@ def _download_npm_tarball(url: str, tmpdir: str, package_name: str) -> Optional[
 
 
 def _npm_pack_fallback(package_name: str, tmpdir: str) -> Optional[str]:
-    """Run npm pack <name> in CWD (works even if temp has no project)."""
+    """Run `npm pack <name>` in CWD and hash result."""
     try:
         res = subprocess.run(['npm', 'pack', package_name], capture_output=True, text=True)
         if res.returncode != 0 or not res.stdout.strip():
@@ -162,12 +153,12 @@ def _npm_pack_fallback(package_name: str, tmpdir: str) -> Optional[str]:
 
 
 def download_package_and_get_hash(package_name: str, manager: str) -> Optional[str]:
-    """Download a package artifact and return its SHA-256 hash (pip/npm)."""
+    """Download package artifact and return SHA-256 (pip/npm/yarn/pnpm)."""
     tmpdir = tempfile.mkdtemp(prefix="pkgscan_")
     try:
         if manager == 'pip3':
             return _download_pip_artifact(package_name, tmpdir)
-        if manager == 'npm':
+        if manager in {'npm', 'yarn', 'pnpm'}:
             registry = _get_npm_registry()
             meta = _get_npm_metadata(package_name)
             # Attempt direct dist.tarball if present in npm view

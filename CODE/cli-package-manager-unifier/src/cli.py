@@ -1,599 +1,994 @@
-"""
-Main CLI interface for the unified package manager.
-"""
+"""Unified package manager CLI."""
 import argparse
 import sys
-from typing import Dict, List, Any, Optional
 import threading
-import time
-from colorama import init, Fore, Style
+import os
+from typing import Callable, Dict, List, Any, Optional, cast
 
+from colorama import init, Fore, Style
 from tabulate import tabulate
 
-# VirusTotal integration
-from src.utils.virustotal import (
-    get_virustotal_api_key, 
-    scan_file_hash_with_virustotal,
-    download_package_and_get_hash
-)
+from src.utils.virustotal import get_virustotal_api_key, download_package_and_get_hash
 from src.utils.package_cache import PackageCacheDB
+from src.utils.security_aggregator import SecurityAggregator
+from src.utils.security_report import write_security_report, write_security_report_markdown
 
-# Manager base and implementations
 from src.managers.base_manager import BasePackageManager
 from src.managers.npm_manager import NPMManager
 from src.managers.pip_manager import PipManager
+from src.managers.yarn_manager import YarnManager
+from src.managers.pnpm_manager import PNPMManager
 
-# Initialize colorama for cross-platform colored output
+# Initialise colorama for colored output
 init(autoreset=True)
+
+__version__ = "1.1.0"
+
+PLACEHOLDER_PACKAGE = "<package>"
+_MANAGER_CHOICES = ["npm", "pip3", "yarn", "pnpm"]
+
+
+def _supports_text(value: str) -> bool:
+    """Return True if current stdout encoding can represent *value*."""
+    encoding = (getattr(sys.stdout, "encoding", None) or "utf-8")
+    try:
+        value.encode(encoding)
+        return True
+    except Exception:
+        return False
+
+
+_SYMBOL_OK = "✓" if _supports_text("✓") else "[OK]"
+_SYMBOL_WARN = "⚠" if _supports_text("⚠") else "[WARN]"
+_SYMBOL_FAIL = "✗" if _supports_text("✗") else "[FAIL]"
 
 
 class UnifiedCLI:
-    """Unified command-line interface for multiple package managers."""
-    
-    def __init__(self):
-        """Initialize the CLI with available package managers."""
+    """CLI for multiple package managers."""
+
+    def __init__(self) -> None:
+        """Init managers and availability."""
+        cache_ttl = int(os.environ.get("SECURITY_CACHE_TTL_SECONDS", "600"))
+        self.security_aggregator = SecurityAggregator(
+            api_key=get_virustotal_api_key(),
+            cache_ttl_seconds=cache_ttl,
+        )
+        self._last_security_scan: Optional[Dict[str, Any]] = None
+        self._findings_display_limit: int = 0
+
         self.managers: Dict[str, BasePackageManager] = {
-            'npm': NPMManager(),
-            'pip3': PipManager()
+            "npm": NPMManager(),
+            "pip3": PipManager(),
+            "yarn": YarnManager(),
+            "pnpm": PNPMManager(),
         }
-        
-        # Check which managers are available
+
+        # Discover available managers
         self.available_managers: Dict[str, BasePackageManager] = {}
         for name, manager in self.managers.items():
             if manager.is_available():
                 self.available_managers[name] = manager
-                print(f"{Fore.GREEN}✓ {name} is available{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}{_SYMBOL_OK} {name} is available{Style.RESET_ALL}")
             else:
-                print(f"{Fore.YELLOW}⚠ {name} is not available{Style.RESET_ALL}")
-    
-    def list_all_packages(self):
-        """List packages from all available managers with ID, current and latest version.
-        Colorize outdated packages (name red) and latest versions (green).
-        """
-        if not self.available_managers:
+                print(f"{Fore.YELLOW}{_SYMBOL_WARN} {name} is not available{Style.RESET_ALL}")
+
+    # ------------------------------------------------------------------
+    # Manager resolution helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_manager(self, manager_name: Optional[str]) -> Optional[str]:
+        """Return validated manager name or None with error printed."""
+        if manager_name:
+            if manager_name not in self.available_managers:
+                print(f"{Fore.RED}Manager '{manager_name}' not available{Style.RESET_ALL}")
+                return None
+            return manager_name
+        return None
+
+    def _prompt_manager(self, choices: Optional[List[str]] = None) -> Optional[str]:
+        """Prompt the user to pick a manager from *choices* (defaults to all available)."""
+        options = choices or list(self.available_managers.keys())
+        if not options:
             print(f"{Fore.RED}No package managers available!{Style.RESET_ALL}")
-            return
-        
-        all_packages: List[Dict[str, Any]] = []
-        
-        for name, manager in self.available_managers.items():
-            print(f"\n{Fore.CYAN}Fetching packages from {name}...{Style.RESET_ALL}")
-            packages = manager.list_packages()
-            # If manager supports outdated check, fetch to map latest versions
-            latest_map = {}
-            if hasattr(manager, 'check_outdated'):
-                try:
-                    outdated = manager.check_outdated()
-                    for item in outdated:
-                        latest_map[item['name'].lower()] = item.get('latest') or item.get('latest_version') or ''
-                except Exception:
-                    latest_map = {}
-
-            # enrich each package with id, current, latest
-            for pkg in packages:
-                name_lower = pkg['name'].lower()
-                pkg_id = pkg.get('id', pkg['name'])
-                current = pkg.get('version', '')
-                latest = latest_map.get(name_lower, current)
-                all_packages.append({
-                    'name': pkg['name'],
-                    'id': pkg_id,
-                    'current': current,
-                    'latest': latest,
-                    'manager': name
-                })
-        
-        if all_packages:
-            # Sort by manager then name
-            all_packages.sort(key=lambda x: (x['manager'], x['name']))
-            
-            # Format as table with colors
-            table_data: List[List[Any]] = []
-            for pkg in all_packages:
-                has_newer = bool(pkg['latest']) and pkg['current'] and (pkg['latest'] != pkg['current'])
-                name_disp = pkg['name']
-                latest_disp = (
-                    f"{Fore.GREEN}{pkg['latest']}{Style.RESET_ALL}" if has_newer else (pkg['latest'] or '')
-                )
-                table_data.append([name_disp, pkg['id'], pkg['current'], latest_disp, pkg['manager']])
-            
-            print(f"\n{Fore.GREEN}Total packages found: {len(all_packages)}{Style.RESET_ALL}")
-            print(tabulate(table_data, 
-                          headers=['Package', 'Package ID', 'Current', 'Latest', 'Manager'],
-                          tablefmt='grid'))
-        else:
-            print(f"{Fore.YELLOW}No packages found{Style.RESET_ALL}")
-
-    def _virustotal_scan(self, package_name: str, manager_name: Optional[str]) -> bool:
-        """
-        Perform a VirusTotal lookup for the given package by downloading it and hashing.
-        Prints progress and returns True if safe/unknown, False if flagged malicious.
-        """
+            return None
+        print(f"\n{Fore.CYAN}Available managers:{Style.RESET_ALL}")
+        for idx, name in enumerate(options, 1):
+            print(f"  {idx}. {name}")
         try:
-            print(f"\n{Fore.CYAN}[Security]{Style.RESET_ALL} Preparing VirusTotal scan for {package_name} ({manager_name or 'auto'})...")
+            raw = input(f"\n{Fore.YELLOW}Select manager (1-{len(options)}): {Style.RESET_ALL}")
+            return options[int(raw) - 1]
+        except (ValueError, IndexError):
+            print(f"{Fore.RED}Invalid choice{Style.RESET_ALL}")
+            return None
 
-            # Simple spinner for async feels
-            spinner_running = True
-            spinner_msg = f"{Fore.CYAN}[Security]{Style.RESET_ALL} Downloading package to calculate hash..."
-            def _spin():
-                seq = ['|', '/', '-', '\\']
-                i = 0
-                while spinner_running:
-                    print(f"\r{spinner_msg} {seq[i % len(seq)]}", end='', flush=True)
-                    i += 1
-                    time.sleep(0.1)
-                print("\r" + ' ' * (len(spinner_msg) + 4) + "\r", end='', flush=True)
+    def _detect_managers_for_package(self, package_name: str) -> List[str]:
+        """Return list of manager names that have *package_name* installed."""
+        found: List[str] = []
+        for name, manager in self.available_managers.items():
+            packages = manager.list_packages()
+            if any(p["name"].lower() == package_name.lower() for p in packages):
+                found.append(name)
+        return found
+
+    def _get_installed_version(self, package_name: str, manager_name: str) -> Optional[str]:
+        """Return installed version for package in manager, if available."""
+        manager = self.available_managers.get(manager_name)
+        if not manager:
+            return None
+        try:
+            for package in manager.list_packages():
+                if str(package.get("name", "")).lower() == package_name.lower():
+                    version = package.get("version")
+                    return str(version) if version else None
+        except Exception:
+            return None
+        return None
+
+    def _resolve_scan_version(self, package_name: str, manager_name: str) -> Optional[str]:
+        """Resolve a package version for security scanning.
+
+        Priority:
+        1) Installed version from local manager package list.
+        2) Exact match from manager search results (registry/latest metadata).
+        """
+        installed = self._get_installed_version(package_name, manager_name)
+        if installed:
+            return installed
+
+        manager = self.available_managers.get(manager_name)
+        if not manager:
+            return None
+
+        try:
+            results = manager.search_package(package_name)
+            for item in results:
+                name = str(item.get("name", "")).lower()
+                if name == package_name.lower():
+                    version = item.get("version")
+                    if version:
+                        return str(version)
+            if results:
+                first_version = results[0].get("version")
+                if first_version:
+                    return str(first_version)
+        except Exception:
+            return None
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Security helpers
+    # ------------------------------------------------------------------
+
+    def _security_scan(self, package_name: str, manager_name: str) -> bool:
+        """Run aggregated security scan and return True if action may proceed."""
+        try:
+            print(
+                f"\n{Fore.CYAN}[Security]{Style.RESET_ALL} Running security scan "
+                f"for {package_name} ({manager_name})..."
+            )
+
+            stop_event = threading.Event()
+            spinner_msg = (
+                f"{Fore.CYAN}[Security]{Style.RESET_ALL} "
+                "Preparing artifact hash and provider checks..."
+            )
+
+            def _spin() -> None:
+                symbols = ["|", "/", "-", "\\"]
+                idx = 0
+                while not stop_event.is_set():
+                    print(f"\r{spinner_msg} {symbols[idx % 4]}", end="", flush=True)
+                    idx += 1
+                    stop_event.wait(0.1)
+                print("\r" + " " * (len(spinner_msg) + 4) + "\r", end="", flush=True)
+
             t = threading.Thread(target=_spin, daemon=True)
             t.start()
 
-            file_hash = download_package_and_get_hash(package_name, manager_name or 'pip3')
-            spinner_running = False
+            file_hash = download_package_and_get_hash(package_name, manager_name)
+            stop_event.set()
             t.join()
-            
-            if not file_hash:
-                print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Failed to download package for hashing.")
-                choice = input(f"{Fore.YELLOW}Proceed with installation anyway? (y/n): {Style.RESET_ALL}").strip().lower()
-                if choice != 'y':
-                    print(f"{Fore.RED}[Security]{Style.RESET_ALL} Installation cancelled by user.")
-                    return False
-                print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} User chose to proceed without hash scan.")
-                return True
-            
-            print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} Package hash: {Fore.YELLOW}{file_hash}{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} Querying VirusTotal...")
-            
-            api_key = get_virustotal_api_key()
-            result = scan_file_hash_with_virustotal(file_hash, api_key)
 
-            # Detailed output
-            if isinstance(result, dict) and result.get('data') and isinstance(result['data'], dict):
-                attrs = result['data'].get('attributes', {}) or {}
-                stats = attrs.get('last_analysis_stats', {}) or {}
-                malicious = int(stats.get('malicious', 0))
-                undetected = int(stats.get('undetected', 0)) if 'undetected' in stats else 0
-                suspicious = int(stats.get('suspicious', 0)) if 'suspicious' in stats else 0
-                harmless = int(stats.get('harmless', 0)) if 'harmless' in stats else 0
-                # Render stats as a table
-                table = [
-                    [f"{Fore.RED}malicious{Style.RESET_ALL}", malicious],
-                    [f"{Fore.YELLOW}suspicious{Style.RESET_ALL}", suspicious],
-                    [f"{Fore.GREEN}harmless{Style.RESET_ALL}", harmless],
-                    ["undetected", undetected],
+            installed_version = self._resolve_scan_version(package_name, manager_name)
+
+            result = self.security_aggregator.analyze(
+                package_name=package_name,
+                manager=manager_name,
+                version=installed_version,
+                file_hash=file_hash,
+            )
+            self._last_security_scan = result
+
+            providers_any = result.get("providers", {})
+            providers = providers_any if isinstance(providers_any, dict) else {}
+            provider_rows: List[List[str]] = []
+            for provider_name, provider_result in providers.items():
+                if not isinstance(provider_result, dict):
+                    continue
+                status = str(provider_result.get("status", "unknown"))
+                provider_findings = provider_result.get("findings", [])
+                findings_count = (
+                    len(provider_findings)
+                    if isinstance(provider_findings, list)
+                    else 0
+                )
+                error_text = str(provider_result.get("error", "-")).strip()
+                if len(error_text) > 120:
+                    error_text = f"{error_text[:117]}..."
+                provider_rows.append([
+                    str(provider_name),
+                    status,
+                    str(findings_count),
+                    error_text or "-",
+                ])
+
+            if provider_rows:
+                print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} Provider statuses:")
+                print(
+                    tabulate(
+                        provider_rows,
+                        headers=["Provider", "Provider Call Status", "Findings", "Error"],
+                        tablefmt="grid",
+                    )
+                )
+
+            counts = result.get("counts", {})
+            raw_findings_any = result.get("findings", [])
+            raw_findings = cast(List[Any], raw_findings_any) if isinstance(raw_findings_any, list) else []
+            findings: List[Dict[str, Any]] = [item for item in raw_findings if isinstance(item, dict)]
+
+            def _remark_for_severity(severity: str) -> str:
+                count = int(counts.get(severity, 0) or 0)
+                matches = [
+                    finding
+                    for finding in findings
+                    if str(finding.get("severity", "unknown")).lower() == severity
                 ]
-                print(tabulate(table, headers=["Result", "Count"], tablefmt="grid"))
-                
-                if malicious > 0:
-                    print(f"{Fore.RED}[Security]{Style.RESET_ALL} VirusTotal flagged '{package_name}' as MALICIOUS. Aborting for safety.")
-                    return False
-                
-                if suspicious > 0:
-                    print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Warning: {suspicious} engine(s) flagged '{package_name}' as SUSPICIOUS.")
-                    choice = input(f"{Fore.YELLOW}Do you want to install anyway? (y/n): {Style.RESET_ALL}").strip().lower()
-                    if choice != 'y':
-                        print(f"{Fore.RED}[Security]{Style.RESET_ALL} Installation cancelled by user.")
-                        return False
-                    print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} User chose to proceed despite suspicious flag.")
-                    return True
-                
-                print(f"{Fore.GREEN}[Security]{Style.RESET_ALL} VirusTotal scan clean. Proceeding.")
-                return True
+                if count == 0:
+                    return "No findings reported at this severity."
+                if matches:
+                    sample_ids = [str(item.get("id", "unknown")) for item in matches[:2]]
+                    sample_text = ", ".join(sample_ids)
+                    if len(matches) > 2:
+                        sample_text = f"{sample_text}, ..."
+                    return (
+                        f"{count} finding(s) classified as {severity}; "
+                        f"examples: {sample_text}"
+                    )
+                return (
+                    f"{count} finding(s) classified as {severity} by provider scores."
+                )
 
-            # Error path
-            if isinstance(result, dict) and result.get('error'):
-                print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} VirusTotal error {result.get('error')}: {result.get('message')}")
-                choice = input(f"{Fore.YELLOW}Proceed with installation anyway? (y/n): {Style.RESET_ALL}").strip().lower()
-                if choice != 'y':
-                    print(f"{Fore.RED}[Security]{Style.RESET_ALL} Installation cancelled by user.")
-                    return False
-                print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} User chose to proceed despite VirusTotal error.")
-                return True
+            table: List[List[Any]] = [
+                [
+                    f"{Fore.RED}critical{Style.RESET_ALL}",
+                    counts.get("critical", 0),
+                    _remark_for_severity("critical"),
+                ],
+                [
+                    f"{Fore.YELLOW}high{Style.RESET_ALL}",
+                    counts.get("high", 0),
+                    _remark_for_severity("high"),
+                ],
+                [
+                    f"{Fore.YELLOW}medium{Style.RESET_ALL}",
+                    counts.get("medium", 0),
+                    _remark_for_severity("medium"),
+                ],
+                [
+                    f"{Fore.GREEN}low{Style.RESET_ALL}",
+                    counts.get("low", 0),
+                    _remark_for_severity("low"),
+                ],
+                [
+                    "coverage",
+                    result.get("coverage", 0),
+                    "How many providers returned usable results for this scan.",
+                ],
+                [
+                    "decision",
+                    result.get("decision", "warn"),
+                    "Final policy outcome based on counts and coverage.",
+                ],
+            ]
+            print(
+                tabulate(
+                    table,
+                    headers=["Security Signal", "Value", "Remarks"],
+                    tablefmt="grid",
+                )
+            )
 
-            # No data path
-            print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} No VirusTotal data for hash. Proceeding.")
-            return True
-        except Exception as ex:
-            print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} VirusTotal scan skipped due to error: {ex}")
-            return True
-    
-    def install_package(self, package_name: str, manager_name: str = None):
-        """
-        Install a package using specified or all managers.
-        
-        Args:
-            package_name: Name of the package to install
-            manager_name: Specific manager to use (optional)
-        """
-        if manager_name:
-            # Install with specific manager
-            if manager_name not in self.available_managers:
-                print(f"{Fore.RED}Manager '{manager_name}' not available{Style.RESET_ALL}")
-                return
-            
-            # Security scan before installing
-            if not self._virustotal_scan(package_name, manager_name):
-                return
-            
-            manager: BasePackageManager = self.available_managers[manager_name]
-            success = manager.install_package(package_name)
-            if success:
-                print(f"{Fore.GREEN}✓ Successfully installed {package_name} via {manager_name}{Style.RESET_ALL}")
-                # --- Cache in SQLite ---
-                version = None
-                pkgs = manager.list_packages()
-                for pkg in pkgs:
-                    if pkg['name'].lower() == package_name.lower():
-                        version = pkg['version']
-                        break
-                db = PackageCacheDB()
-                db.add_package(package_name, version or '', manager_name)
-                db.close()
-            else:
-                print(f"{Fore.RED}✗ Failed to install {package_name}{Style.RESET_ALL}")
-        else:
-            # Ask user which manager to use
-            print(f"\n{Fore.CYAN}Available managers:{Style.RESET_ALL}")
-            for idx, name in enumerate(self.available_managers.keys(), 1):
-                print(f"  {idx}. {name}")
-            try:
-                choice = input(f"\n{Fore.YELLOW}Select manager (1-{len(self.available_managers)}): {Style.RESET_ALL}")
-                idx = int(choice) - 1
-                manager_name = list(self.available_managers.keys())[idx]
-                
-                # Security scan before installing
-                if not self._virustotal_scan(package_name, manager_name):
-                    return
-                
-                manager: BasePackageManager = self.available_managers[manager_name]
-                success = manager.install_package(package_name)
-                if success:
-                    print(f"{Fore.GREEN}✓ Successfully installed {package_name} via {manager_name}{Style.RESET_ALL}")
-                    # --- Cache in SQLite ---
-                    version = None
-                    pkgs = manager.list_packages()
-                    for pkg in pkgs:
-                        if pkg['name'].lower() == package_name.lower():
-                            version = pkg['version']
-                            break
-                    db = PackageCacheDB()
-                    db.add_package(package_name, version or '', manager_name)
-                    db.close()
+            findings_limit = max(0, int(self._findings_display_limit or 0))
+            if findings_limit > 0:
+                shown = findings[:findings_limit]
+                if shown:
+                    print(
+                        f"{Fore.CYAN}[Security]{Style.RESET_ALL} "
+                        f"Showing {len(shown)}/{len(findings)} findings:"
+                    )
+                    finding_rows: List[List[str]] = []
+                    for finding in shown:
+                        summary = str(finding.get("summary", "")).strip()
+                        if len(summary) > 120:
+                            summary = f"{summary[:117]}..."
+                        finding_rows.append(
+                            [
+                                str(finding.get("severity", "unknown")),
+                                str(finding.get("source", "unknown")),
+                                str(finding.get("id", "unknown")),
+                                summary,
+                            ]
+                        )
+                    print(
+                        tabulate(
+                            finding_rows,
+                            headers=["Severity", "Source", "ID", "Summary"],
+                            tablefmt="grid",
+                        )
+                    )
                 else:
-                    print(f"{Fore.RED}✗ Failed to install {package_name}{Style.RESET_ALL}")
-            except (ValueError, IndexError):
-                print(f"{Fore.RED}Invalid choice{Style.RESET_ALL}")
-    
-    def search_packages(self, query: str, manager_name: str = None):
-        """
-        Search for packages across managers.
-        
-        Args:
-            query: Search query
-            manager_name: Specific manager to search (optional)
-        """
-        if manager_name:
-            # Search with specific manager
-            if manager_name not in self.available_managers:
-                print(f"{Fore.RED}Manager '{manager_name}' not available{Style.RESET_ALL}")
-                return
-            
-            managers_to_search: Dict[str, BasePackageManager] = {manager_name: self.available_managers[manager_name]}
+                    print(f"{Fore.GREEN}[Security]{Style.RESET_ALL} No findings reported.")
+
+            decision = str(result.get("decision", "warn")).lower()
+            reason = result.get("reason", "No reason provided")
+            print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} Decision: {decision} ({reason})")
+
+            if decision == "block":
+                print(f"{Fore.RED}[Security]{Style.RESET_ALL} Action blocked by policy.")
+                return False
+
+            if decision == "warn":
+                warn_sources = sorted(
+                    {
+                        str(finding.get("source", "unknown"))
+                        for finding in findings
+                        if str(finding.get("severity", "unknown")).lower() in {"high", "medium"}
+                    }
+                )
+                if warn_sources:
+                    print(
+                        f"{Fore.YELLOW}[Security]{Style.RESET_ALL} "
+                        f"Warn due to high/medium findings from: {', '.join(warn_sources)}"
+                    )
+                print(
+                    f"{Fore.YELLOW}[Security]{Style.RESET_ALL} "
+                    "Warning detected. Review/download report, then confirm whether to proceed."
+                )
+                return True
+
+            print(f"{Fore.GREEN}[Security]{Style.RESET_ALL} Security checks passed. Proceeding.")
+            return True
+
+        except Exception as ex:
+            print(
+                f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Security scan skipped "
+                f"due to error: {ex}"
+            )
+            self._last_security_scan = {
+                "decision": "warn",
+                "reason": str(ex),
+                "coverage": 0,
+                "counts": {},
+                "findings": [],
+                "providers": {},
+            }
+            return True
+
+    def _emit_security_report(
+        self,
+        action: str,
+        package_name: str,
+        manager_name: str,
+        operation_status: str,
+        operation_success: bool,
+        scan_result: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Write JSON report for install/upgrade/uninstall operations."""
+        payload = scan_result or {
+            "decision": "unknown",
+            "reason": "No scan payload available",
+            "coverage": 0,
+            "counts": {},
+            "findings": [],
+            "providers": {},
+        }
+        report_path = write_security_report(
+            action=action,
+            package_name=package_name,
+            manager_name=manager_name,
+            scan_result=payload,
+            operation_status=operation_status,
+            operation_success=operation_success,
+        )
+        if report_path:
+            print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} Report saved: {report_path}")
+
+    def _offer_markdown_report_before_action(
+        self,
+        action: str,
+        package_name: str,
+        manager_name: str,
+    ) -> None:
+        """Ask user if they want a markdown report before action execution."""
+        if not self._last_security_scan:
+            return
+
+        try:
+            choice = (
+                input(
+                    f"{Fore.CYAN}[Security]{Style.RESET_ALL} "
+                    f"Download report as Markdown before {action}? (y/n): "
+                )
+                .strip()
+                .lower()
+            )
+        except (EOFError, OSError):
+            choice = "n"
+
+        if choice != "y":
+            return
+
+        md_path = write_security_report_markdown(
+            action=action,
+            package_name=package_name,
+            manager_name=manager_name,
+            scan_result=self._last_security_scan,
+            operation_status=f"pre-{action}",
+            operation_success=False,
+        )
+        if md_path:
+            print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} Markdown report saved: {md_path}")
         else:
-            # Search all managers
-            managers_to_search: Dict[str, BasePackageManager] = self.available_managers
-        
-        all_results: List[Dict[str, Any]] = []
-        
-        for name, manager in managers_to_search.items():
-            print(f"\n{Fore.CYAN}Searching {name}...{Style.RESET_ALL}")
-            results = manager.search_package(query)
-            all_results.extend(results)
-        
-        if all_results:
-            # Format as table
-            table_data: List[List[Any]] = [[pkg['name'], pkg['version'], pkg.get('description', ''), pkg['manager']] 
-                         for pkg in all_results]
-            
-            print(f"\n{Fore.GREEN}Found {len(all_results)} results:{Style.RESET_ALL}")
-            print(tabulate(table_data, 
-                          headers=['Package', 'Version', 'Description', 'Manager'],
-                          tablefmt='grid'))
+            print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Could not save Markdown report.")
+
+    # ------------------------------------------------------------------
+    # Unified action executor (eliminates install/upgrade duplication)
+    # ------------------------------------------------------------------
+
+    def _execute_with_security(
+        self,
+        action: str,
+        package_name: str,
+        manager_name: str,
+        operation: Callable[[str], bool],
+        *,
+        skip_security: bool = False,
+        show_findings: int = 0,
+    ) -> None:
+        """Run security scan → execute *operation* → emit report.
+
+        This single helper replaces the previously duplicated logic in
+        install_package, upgrade_package, and update_package.
+        """
+        # 1. Security gate
+        if not skip_security:
+            self._findings_display_limit = max(0, int(show_findings or 0))
+            try:
+                may_proceed = self._security_scan(package_name, manager_name)
+
+                # Optional pre-action markdown export prompt (must come before proceed confirmation)
+                if action in ("install", "upgrade"):
+                    self._offer_markdown_report_before_action(action, package_name, manager_name)
+
+                if not may_proceed:
+                    self._emit_security_report(
+                        action=action,
+                        package_name=package_name,
+                        manager_name=manager_name,
+                        operation_status="blocked",
+                        operation_success=False,
+                        scan_result=self._last_security_scan,
+                    )
+                    return
+
+                decision = str((self._last_security_scan or {}).get("decision", "allow")).lower()
+                if decision == "warn":
+                    try:
+                        choice = (
+                            input(
+                                f"{Fore.YELLOW}Security warning detected. Proceed anyway? (y/n): "
+                                f"{Style.RESET_ALL}"
+                            )
+                            .strip()
+                            .lower()
+                        )
+                    except (EOFError, OSError):
+                        choice = "n"
+
+                    if choice != "y":
+                        print(f"{Fore.RED}[Security]{Style.RESET_ALL} Action cancelled by user.")
+                        self._emit_security_report(
+                            action=action,
+                            package_name=package_name,
+                            manager_name=manager_name,
+                            operation_status="blocked",
+                            operation_success=False,
+                            scan_result=self._last_security_scan,
+                        )
+                        return
+
+                    print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Proceeding despite warning.")
+            finally:
+                self._findings_display_limit = 0
+
+        # 2. Execute the manager operation
+        success = operation(package_name)
+
+        if success:
+            print(
+                f"{Fore.GREEN}{_SYMBOL_OK} Successfully {action}ed {package_name} "
+                f"via {manager_name}{Style.RESET_ALL}"
+            )
+            # Record in the local package cache DB
+            if action == "install":
+                self._cache_installed_package(package_name, manager_name)
         else:
-            print(f"{Fore.YELLOW}No packages found matching '{query}'{Style.RESET_ALL}")
-    
-    def check_updates(self, manager_name: Optional[str] = None):
-        """
-        Check for package updates across managers.
-        
-        Args:
-            manager_name: Specific manager to check (optional)
-        """
+            print(f"{Fore.RED}{_SYMBOL_FAIL} Failed to {action} {package_name}{Style.RESET_ALL}")
+
+        # 3. Emit report
+        self._emit_security_report(
+            action=action,
+            package_name=package_name,
+            manager_name=manager_name,
+            operation_status="completed" if success else "failed",
+            operation_success=success,
+            scan_result=self._last_security_scan,
+        )
+
+    def _cache_installed_package(self, package_name: str, manager_name: str) -> None:
+        """Write package info to the local SQLite cache."""
+        manager = self.available_managers.get(manager_name)
+        if not manager:
+            return
+        version = ""
+        try:
+            for pkg in manager.list_packages():
+                if pkg["name"].lower() == package_name.lower():
+                    version = pkg.get("version", "")
+                    break
+        except Exception:
+            pass
+        db = PackageCacheDB()
+        try:
+            db.add_package(package_name, version, manager_name)
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # Public commands
+    # ------------------------------------------------------------------
+
+    def list_all_packages(self) -> None:
+        """List installed packages with versions."""
         if not self.available_managers:
             print(f"{Fore.RED}No package managers available!{Style.RESET_ALL}")
             return
-        
-        if manager_name:
-            # Check specific manager
-            if manager_name not in self.available_managers:
-                print(f"{Fore.RED}Manager '{manager_name}' not available{Style.RESET_ALL}")
-                return
-            
-            managers_to_check: Dict[str, BasePackageManager] = {manager_name: self.available_managers[manager_name]}
+
+        all_packages: List[Dict[str, Any]] = []
+
+        for mgr_name, manager in self.available_managers.items():
+            print(f"\n{Fore.CYAN}Fetching packages from {mgr_name}...{Style.RESET_ALL}")
+            packages = manager.list_packages()
+
+            latest_map: Dict[str, str] = {}
+            try:
+                for item in manager.check_outdated():
+                    latest_map[item["name"].lower()] = (
+                        item.get("latest") or item.get("latest_version") or ""
+                    )
+            except Exception:
+                pass
+
+            for pkg in packages:
+                current = pkg.get("version", "")
+                latest = latest_map.get(pkg["name"].lower(), current)
+                all_packages.append(
+                    {
+                        "name": pkg["name"],
+                        "id": pkg.get("id", pkg["name"]),
+                        "current": current,
+                        "latest": latest,
+                        "manager": mgr_name,
+                    }
+                )
+
+        if all_packages:
+            all_packages.sort(key=lambda x: (x["manager"], x["name"]))
+            table_data: List[List[Any]] = []
+            for pkg in all_packages:
+                has_newer = (
+                    bool(pkg["latest"])
+                    and pkg["current"]
+                    and pkg["latest"] != pkg["current"]
+                )
+                latest_disp = (
+                    f"{Fore.GREEN}{pkg['latest']}{Style.RESET_ALL}"
+                    if has_newer
+                    else (pkg["latest"] or "")
+                )
+                table_data.append(
+                    [pkg["name"], pkg["id"], pkg["current"], latest_disp, pkg["manager"]]
+                )
+
+            print(f"\n{Fore.GREEN}Total packages found: {len(all_packages)}{Style.RESET_ALL}")
+            print(
+                tabulate(
+                    table_data,
+                    headers=["Package", "Package ID", "Current", "Latest", "Manager"],
+                    tablefmt="grid",
+                )
+            )
         else:
-            # Check all managers
-            managers_to_check: Dict[str, BasePackageManager] = self.available_managers
-        
+            print(f"{Fore.YELLOW}No packages found{Style.RESET_ALL}")
+
+    def install_package(
+        self,
+        package_name: str,
+        manager_name: Optional[str] = None,
+        *,
+        skip_security: bool = False,
+        show_findings: int = 0,
+    ) -> None:
+        """Install via given or interactively selected manager."""
+        resolved = self._resolve_manager(manager_name) if manager_name else self._prompt_manager()
+        if not resolved:
+            return
+        manager = self.available_managers[resolved]
+        self._execute_with_security(
+            "install", package_name, resolved, manager.install_package,
+            skip_security=skip_security,
+            show_findings=show_findings,
+        )
+
+    def upgrade_package(
+        self,
+        package_name: str,
+        manager_name: Optional[str] = None,
+        *,
+        skip_security: bool = False,
+        show_findings: int = 0,
+    ) -> None:
+        """Upgrade to latest version (explicit manager or interactive)."""
+        if manager_name:
+            resolved = self._resolve_manager(manager_name)
+            if not resolved:
+                return
+        else:
+            # Auto-detect which manager(s) have this package installed
+            print(f"\n{Fore.CYAN}Detecting package manager for {package_name}...{Style.RESET_ALL}")
+            found = self._detect_managers_for_package(package_name)
+            if not found:
+                print(
+                    f"{Fore.RED}Package '{package_name}' not found in any installed packages{Style.RESET_ALL}"
+                )
+                print(
+                    f"{Fore.YELLOW}Tip: Use 'python -m src.cli install {package_name} "
+                    f"-m <manager>' to install it first{Style.RESET_ALL}"
+                )
+                return
+            if len(found) == 1:
+                resolved = found[0]
+                print(f"{Fore.GREEN}Found {package_name} in {resolved}{Style.RESET_ALL}")
+            else:
+                print(
+                    f"{Fore.YELLOW}Package '{package_name}' found in multiple managers:{Style.RESET_ALL}"
+                )
+                resolved = self._prompt_manager(found)
+                if not resolved:
+                    return
+
+        manager = self.available_managers[resolved]
+        self._execute_with_security(
+            "upgrade", package_name, resolved, manager.upgrade_package,
+            skip_security=skip_security,
+            show_findings=show_findings,
+        )
+
+    def uninstall_package(
+        self,
+        package_name: str,
+        manager_name: Optional[str] = None,
+    ) -> None:
+        """Uninstall a package (explicit manager or auto-detect)."""
+        if manager_name:
+            resolved = self._resolve_manager(manager_name)
+            if not resolved:
+                return
+        else:
+            found = self._detect_managers_for_package(package_name)
+            if not found:
+                print(
+                    f"{Fore.RED}Package '{package_name}' not found in any installed packages{Style.RESET_ALL}"
+                )
+                return
+            if len(found) == 1:
+                resolved = found[0]
+            else:
+                resolved = self._prompt_manager(found)
+                if not resolved:
+                    return
+
+        manager = self.available_managers[resolved]
+        success = manager.uninstall_package(package_name)
+        if success:
+            print(
+                f"{Fore.GREEN}{_SYMBOL_OK} Successfully uninstalled {package_name} "
+                f"via {resolved}{Style.RESET_ALL}"
+            )
+        else:
+            print(f"{Fore.RED}{_SYMBOL_FAIL} Failed to uninstall {package_name}{Style.RESET_ALL}")
+
+    def search_packages(
+        self, query: str, manager_name: Optional[str] = None
+    ) -> None:
+        """Search registries."""
+        if manager_name:
+            resolved = self._resolve_manager(manager_name)
+            if not resolved:
+                return
+            managers_to_search = {resolved: self.available_managers[resolved]}
+        else:
+            managers_to_search = dict(self.available_managers)
+
+        all_results: List[Dict[str, Any]] = []
+        for name, manager in managers_to_search.items():
+            print(f"\n{Fore.CYAN}Searching {name}...{Style.RESET_ALL}")
+            all_results.extend(manager.search_package(query))
+
+        if all_results:
+            table_data = [
+                [p["name"], p["version"], p.get("description", ""), p["manager"]]
+                for p in all_results
+            ]
+            print(f"\n{Fore.GREEN}Found {len(all_results)} results:{Style.RESET_ALL}")
+            print(
+                tabulate(
+                    table_data,
+                    headers=["Package", "Version", "Description", "Manager"],
+                    tablefmt="grid",
+                )
+            )
+        else:
+            print(f"{Fore.YELLOW}No packages found matching '{query}'{Style.RESET_ALL}")
+
+    def check_updates(self, manager_name: Optional[str] = None) -> None:
+        """List outdated packages."""
+        if not self.available_managers:
+            print(f"{Fore.RED}No package managers available!{Style.RESET_ALL}")
+            return
+
+        if manager_name:
+            resolved = self._resolve_manager(manager_name)
+            if not resolved:
+                return
+            managers_to_check = {resolved: self.available_managers[resolved]}
+        else:
+            managers_to_check = dict(self.available_managers)
+
         all_outdated: List[Dict[str, Any]] = []
-        
         for name, manager in managers_to_check.items():
             print(f"\n{Fore.CYAN}Checking for updates in {name}...{Style.RESET_ALL}")
-            
-            # Check if manager has check_outdated method
-            if hasattr(manager, 'check_outdated'):
-                outdated = manager.check_outdated()
-                all_outdated.extend(outdated)
-            else:
-                print(f"{Fore.YELLOW}Update checking not implemented for {name}{Style.RESET_ALL}")
-        
+            all_outdated.extend(manager.check_outdated())
+
         if all_outdated:
-            # Format as table
-            table_data: List[List[Any]] = [
-                [
-                    pkg['name'], 
-                    pkg['current'], 
-                    pkg['latest'],
-                    pkg['manager']
-                ] 
-                for pkg in all_outdated
+            table_data = [
+                [p["name"], p["current"], p["latest"], p["manager"]]
+                for p in all_outdated
             ]
-            
             print(f"\n{Fore.YELLOW}Found {len(all_outdated)} outdated packages:{Style.RESET_ALL}")
-            print(tabulate(table_data, 
-                          headers=['Package', 'Current', 'Latest', 'Manager'],
-                          tablefmt='grid'))
-            
-            print(f"\n{Fore.CYAN}To update packages:{Style.RESET_ALL}")
-            print("  python -m src.cli update <package-name>")
+            print(
+                tabulate(
+                    table_data,
+                    headers=["Package", "Current", "Latest", "Manager"],
+                    tablefmt="grid",
+                )
+            )
+            print(f"\n{Fore.CYAN}To update a package:{Style.RESET_ALL}")
+            print("  python -m src.cli upgrade <package-name>")
         else:
-            print(f"\n{Fore.GREEN}✓ All packages are up to date!{Style.RESET_ALL}")
-    
-    def update_package(self, package_name: str):
-        """
-        Update a package to the latest version by detecting which manager has it installed.
-        
-        Args:
-            package_name: Name of the package to update
-        """
-        # Auto-detect which manager has the package installed
-        print(f"\n{Fore.CYAN}Detecting package manager for {package_name}...{Style.RESET_ALL}")
-        
-        found_managers: List[str] = []
-        
-        for name, manager in self.available_managers.items():
-            packages = manager.list_packages()
-            if any(pkg['name'].lower() == package_name.lower() for pkg in packages):
-                found_managers.append(name)
-        
-        if not found_managers:
-            print(f"{Fore.RED}Package '{package_name}' not found in any installed packages{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}Tip: Use 'python -m src.cli install {package_name} -m <manager>' to install it first{Style.RESET_ALL}")
-            return
-        
-        if len(found_managers) == 1:
-            # Package found in only one manager, use it
-            manager_name = found_managers[0]
-            print(f"{Fore.GREEN}Found {package_name} in {manager_name}{Style.RESET_ALL}")
-            
-            manager: BasePackageManager = self.available_managers[manager_name]
-            
-            # Security scan before updating
-            if not self._virustotal_scan(package_name, manager_name):
-                return
+            print(f"\n{Fore.GREEN}{_SYMBOL_OK} All packages are up to date!{Style.RESET_ALL}")
 
-            if hasattr(manager, 'upgrade_package'):
-                success = manager.upgrade_package(package_name)
-                
-                if success:
-                    print(f"{Fore.GREEN}✓ Successfully updated {package_name} via {manager_name}{Style.RESET_ALL}")
-                else:
-                    print(f"{Fore.RED}✗ Failed to update {package_name}{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}Update not implemented for {manager_name}{Style.RESET_ALL}")
-        else:
-            # Package found in multiple managers, ask user
-            print(f"{Fore.YELLOW}Package '{package_name}' found in multiple managers:{Style.RESET_ALL}")
-            for idx, name in enumerate(found_managers, 1):
-                print(f"  {idx}. {name}")
-            
-            try:
-                choice = input(f"\n{Fore.YELLOW}Select manager (1-{len(found_managers)}): {Style.RESET_ALL}")
-                idx = int(choice) - 1
-                manager_name = found_managers[idx]
-                
-                manager: BasePackageManager = self.available_managers[manager_name]
-                
-                # Security scan before updating
-                if not self._virustotal_scan(package_name, manager_name):
-                    return
 
-                if hasattr(manager, 'upgrade_package'):
-                    manager.upgrade_package(package_name)
-                else:
-                    print(f"{Fore.YELLOW}Update not implemented for {manager_name}{Style.RESET_ALL}")
-            
-            except (ValueError, IndexError):
-                print(f"{Fore.RED}Invalid choice{Style.RESET_ALL}")
-    
-    def upgrade_package(self, package_name: str, manager_name: Optional[str] = None):
-        """
-        Upgrade a package to the latest version.
-        
-        Args:
-            package_name: Name of the package to upgrade
-            manager_name: Specific manager to use (optional)
-        """
-        if manager_name:
-            # Upgrade with specific manager
-            if manager_name not in self.available_managers:
-                print(f"{Fore.RED}Manager '{manager_name}' not available{Style.RESET_ALL}")
-                return
-            
-            manager: BasePackageManager = self.available_managers[manager_name]
-            
-            # Security scan before upgrading
-            if not self._virustotal_scan(package_name, manager_name):
-                return
+# ======================================================================
+# Argument parsing & entry point
+# ======================================================================
 
-            # Check if manager has upgrade_package method
-            if hasattr(manager, 'upgrade_package'):
-                success = manager.upgrade_package(package_name)
-                
-                if success:
-                    print(f"{Fore.GREEN}✓ Successfully upgraded {package_name} via {manager_name}{Style.RESET_ALL}")
-                else:
-                    print(f"{Fore.RED}✗ Failed to upgrade {package_name}{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}Upgrade not implemented for {manager_name}{Style.RESET_ALL}")
-        else:
-            # Ask user which manager to use
-            print(f"\n{Fore.CYAN}Available managers:{Style.RESET_ALL}")
-            for idx, name in enumerate(self.available_managers.keys(), 1):
-                print(f"  {idx}. {name}")
-            
-            try:
-                choice = input(f"\n{Fore.YELLOW}Select manager (1-{len(self.available_managers)}): {Style.RESET_ALL}")
-                idx = int(choice) - 1
-                manager_name = list(self.available_managers.keys())[idx]
-                
-                manager: BasePackageManager = self.available_managers[manager_name]
-                
-                # Security scan before upgrading
-                if not self._virustotal_scan(package_name, manager_name):
-                    return
+def _is_placeholder(name: str) -> bool:
+    return name in ("package-name", PLACEHOLDER_PACKAGE)
 
-                if hasattr(manager, 'upgrade_package'):
-                    manager.upgrade_package(package_name)
-                else:
-                    print(f"{Fore.YELLOW}Upgrade not implemented for {manager_name}{Style.RESET_ALL}")
-            
-            except (ValueError, IndexError):
-                print(f"{Fore.RED}Invalid choice{Style.RESET_ALL}")
 
-def main():
-    """Main entry point for the CLI."""
+def _print_help() -> None:
+    """Print extended help text."""
+    sep = f"{Fore.CYAN}{'=' * 60}{Style.RESET_ALL}"
+    print(f"\n{sep}")
+    print(f"{Fore.GREEN}Unified CLI — Help{Style.RESET_ALL}")
+    print(f"{sep}\n")
+
+    cmds = [
+        (
+            "list",
+            "List all installed packages from available managers.\n"
+            "  Latest column is green when an update is available.\n"
+            "  Example: unified list\n",
+        ),
+        (
+            "search <query> [-m <manager>]",
+            "Search for packages across npm, pip3, yarn, and/or pnpm.\n"
+            "  Examples:\n"
+            "    unified search requests\n"
+            "    unified search react -m npm\n",
+        ),
+        (
+            "install <package> [-m <manager>] [--no-security] [--show-findings [N]]",
+            "Install a package (runs multi-provider security scan first).\n"
+            "  Examples:\n"
+            "    unified install express -m npm\n"
+            "    unified install requests -m pip3\n",
+        ),
+        (
+            "upgrade [package] [-m <manager>] [--no-security] [--show-findings [N]]",
+            "Without a package: list outdated packages.\n"
+            "  With a package: upgrade it (auto-detect manager unless -m).\n"
+            "  Examples:\n"
+            "    unified upgrade\n"
+            "    unified upgrade pytest\n"
+            "    unified upgrade express -m npm\n",
+        ),
+        (
+            "update [package] [-m <manager>] [--no-security] [--show-findings [N]]",
+            "Alias for 'upgrade' (same behaviour).\n",
+        ),
+        (
+            "uninstall <package> [-m <manager>]",
+            "Remove a package (auto-detect manager unless -m).\n"
+            "  Example: unified uninstall lodash -m npm\n",
+        ),
+        (
+            "help",
+            "Show this help message.\n",
+        ),
+    ]
+
+    for title, body in cmds:
+        print(f"{Fore.YELLOW}{title}{Style.RESET_ALL}")
+        print(f"  {body}")
+
+    print(f"{Fore.MAGENTA}Security Scanning:{Style.RESET_ALL}")
+    print("  • Downloads artifact to a temp directory and computes SHA-256.")
+    print("  • Aggregates OSV, GitHub Advisory, OSS Index, and VirusTotal.")
+    print("  • Decision policy: critical/malicious → block, medium/high → warn, clean → allow.")
+    print("  • Retries, timeouts, rate-limit handling with fallback.")
+    print("  • JSON reports saved in security_reports/.")
+    print(f"  • Skip scanning with {Fore.YELLOW}--no-security{Style.RESET_ALL}.\n")
+    print("  • Show findings in terminal with --show-findings or --show-findings N.\n")
+
+    print(f"{sep}")
+    print(f"{Fore.GREEN}Supported Package Managers:{Style.RESET_ALL}")
+    print(f"{sep}\n")
+    print("  • npm  (Node Package Manager)")
+    print("  • pip3 (Python Package Manager)")
+    print("  • yarn (Yarn Package Manager)")
+    print("  • pnpm (pnpm Package Manager)\n")
+
+
+def main() -> None:
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description='Unified Package Manager CLI',
+        description="Unified Package Manager CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    %(prog)s list                    # List all packages
-    %(prog)s install <package>       # Install a package (replace <package>)
-    %(prog)s install express -m npm  # Install with specific manager
-    %(prog)s search django           # Search for packages
-    %(prog)s search react -m npm     # Search in specific manager
-    %(prog)s update                  # Check for outdated packages
-    %(prog)s update pytest           # Update pytest (auto-detects manager)
-    %(prog)s upgrade express -m npm  # Alternative: upgrade with specific manager
-                """
+    %(prog)s list                        # List all packages
+    %(prog)s install express -m npm      # Install with specific manager
+    %(prog)s search django               # Search for packages
+    %(prog)s upgrade                     # List outdated packages
+    %(prog)s upgrade pytest              # Upgrade (auto-detect manager)
+    %(prog)s update pytest               # Alias for upgrade
+    %(prog)s uninstall lodash -m npm     # Remove a package
+        """,
     )
-    
-    parser.add_argument('command', 
-                       choices=['list', 'install', 'search', 'update', 'upgrade', 'help'],
-                       help='Command to execute')
-    
-    parser.add_argument('package', 
-                       nargs='?',
-                       help='Package name (for install/search)')
-    
-    parser.add_argument('-m', '--manager',
-                       choices=['npm', 'pip3'],
-                       help='Specific package manager to use')
-    
+
+    parser.add_argument(
+        "command",
+        choices=["list", "install", "search", "upgrade", "update", "uninstall", "help"],
+        help="Command to execute",
+    )
+    parser.add_argument("package", nargs="?", help="Package name (for install/search/upgrade/uninstall)")
+    parser.add_argument(
+        "-m",
+        "--manager",
+        choices=_MANAGER_CHOICES,
+        help="Specific package manager to use",
+    )
+    parser.add_argument(
+        "--no-security",
+        action="store_true",
+        default=False,
+        help="Skip the security scan before install/upgrade",
+    )
+    parser.add_argument(
+        "--show-findings",
+        nargs="?",
+        type=int,
+        const=10,
+        default=0,
+        metavar="N",
+        help="Show top N security findings in terminal (default: 10 when provided without N)",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
 
     args = parser.parse_args()
-    
-    # Create CLI instance
-    cli = UnifiedCLI()
-    
-    # Execute command
-    if args.command == 'help':
-        print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}Available Commands:{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
-        print(f"{Fore.YELLOW}list{Style.RESET_ALL}")
-        print("  List all installed packages from npm and pip3")
-        print("  Example: unified list\n")
-        print(f"{Fore.YELLOW}search <query> [-m <manager>]{Style.RESET_ALL}")
-        print("  Search for packages across npm and/or pip3")
-        print("  Examples:")
-        print("    unified search requests")
-        print("    unified search react -m npm\n")
-        print(f"{Fore.YELLOW}install <package> [-m <manager>]{Style.RESET_ALL}")
-        print("  Install a package using specified or selected manager")
-        print("  Examples:")
-        print("    unified install express -m npm")
-        print("    unified install requests -m pip3\n")
-        print(f"{Fore.YELLOW}update [package]{Style.RESET_ALL}")
-        print("  Check for outdated packages or update a specific package")
-        print("  Examples:")
-        print("    unified update              # Check all outdated packages")
-        print("    unified update pytest       # Update pytest (auto-detects manager)\n")
-        print(f"{Fore.YELLOW}upgrade <package> -m <manager>{Style.RESET_ALL}")
-        print(f"  Upgrade a package using a specific manager")
-        print(f"  Examples:")
-        print(f"    unified upgrade express -m npm")
-        print(f"    unified upgrade requests -m pip3\n")
-        print(f"{Fore.YELLOW}help{Style.RESET_ALL}")
-        print(f"  Show this help message\n")
-        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}Supported Package Managers:{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
-        print(f"  • npm (Node Package Manager)")
-        print(f"  • pip3 (Python Package Manager)\n")
+
+    # Help (exit immediately — no need to probe managers)
+    if args.command == "help":
+        _print_help()
         sys.exit(0)
-    
-    elif args.command == 'list':
+
+    # Create CLI instance (probes manager availability)
+    cli = UnifiedCLI()
+
+    if args.command == "list":
         cli.list_all_packages()
-    
-    elif args.command == 'install':
+
+    elif args.command == "install":
         if not args.package:
             print(f"{Fore.RED}Error: Package name required for install{Style.RESET_ALL}")
             sys.exit(1)
-        # Safety: prevent accidental execution of placeholder examples
-        if args.package == 'package-name' or args.package.strip() == '<package>':
-            print(f"{Fore.YELLOW}Refusing to install placeholder package name '{args.package}'. Replace with a real package name.{Style.RESET_ALL}")
+        if _is_placeholder(args.package.strip()):
+            print(
+                f"{Fore.YELLOW}Refusing to install placeholder name '{args.package}'. "
+                f"Replace with a real package name.{Style.RESET_ALL}"
+            )
             sys.exit(1)
+        cli.install_package(
+            args.package,
+            args.manager,
+            skip_security=args.no_security,
+            show_findings=args.show_findings,
+        )
 
-        cli.install_package(args.package, args.manager)
-    
-    elif args.command == 'search':
+    elif args.command == "search":
         if not args.package:
             print(f"{Fore.RED}Error: Search query required{Style.RESET_ALL}")
             sys.exit(1)
         cli.search_packages(args.package, args.manager)
-    
-    elif args.command == 'update':
-        if args.package:
-            # Update specific package
-            # Safety: prevent accidental execution of placeholder examples
-            if args.package == 'package-name' or args.package.strip() == '<package>':
-                print(f"{Fore.YELLOW}Refusing to update placeholder package name '{args.package}'. Replace with a real package name.{Style.RESET_ALL}")
-                sys.exit(1)
-            
-            cli.update_package(args.package)
-        else:
-            # Check for all outdated packages
-            cli.check_updates(args.manager)
-    
-    elif args.command == 'upgrade':
-        if not args.package:
-            print(f"{Fore.RED}Error: Package name required for upgrade{Style.RESET_ALL}")
-            sys.exit(1)
-        # Safety: prevent accidental execution of placeholder examples
-        if args.package == 'package-name' or args.package.strip() == '<package>':
-            print(f"{Fore.YELLOW}Refusing to upgrade placeholder package name '{args.package}'. Replace with a real package name.{Style.RESET_ALL}")
-            sys.exit(1)
-        
-        cli.upgrade_package(args.package, args.manager)
 
-if __name__ == '__main__':
+    elif args.command in ("upgrade", "update"):
+        if not args.package:
+            cli.check_updates(args.manager)
+            sys.exit(0)
+        if _is_placeholder(args.package.strip()):
+            print(
+                f"{Fore.YELLOW}Refusing to upgrade placeholder name '{args.package}'. "
+                f"Replace with a real package name.{Style.RESET_ALL}"
+            )
+            sys.exit(1)
+        cli.upgrade_package(
+            args.package,
+            args.manager,
+            skip_security=args.no_security,
+            show_findings=args.show_findings,
+        )
+
+    elif args.command == "uninstall":
+        if not args.package:
+            print(f"{Fore.RED}Error: Package name required for uninstall{Style.RESET_ALL}")
+            sys.exit(1)
+        if _is_placeholder(args.package.strip()):
+            print(
+                f"{Fore.YELLOW}Refusing to uninstall placeholder name '{args.package}'. "
+                f"Replace with a real package name.{Style.RESET_ALL}"
+            )
+            sys.exit(1)
+        cli.uninstall_package(args.package, args.manager)
+
+
+if __name__ == "__main__":
     main()

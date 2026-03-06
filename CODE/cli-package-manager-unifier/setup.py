@@ -1,12 +1,10 @@
-"""
-Setup script for installing the unified package manager CLI.
-"""
+"""Setup script for the unified CLI."""
 from setuptools import setup, find_packages
 
 setup(
     name='cli-package-manager-unifier',
-    version='1.0.0',
-    description='A unified CLI for managing npm and pip3 packages',
+    version='1.1.0',
+    description='A unified CLI for managing npm, pip3, yarn, and pnpm packages with security scanning',
     author='Your Name',
     packages=find_packages(),
     install_requires=[

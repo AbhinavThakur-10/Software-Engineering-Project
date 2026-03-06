@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Entry point script for the unified package manager CLI.
-This allows running commands as: python unified.py <command>
-"""
+"""Entry point for the unified package manager CLI."""
 import sys
 from src.cli import main
 

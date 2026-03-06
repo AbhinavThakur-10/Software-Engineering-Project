@@ -1,30 +1,29 @@
 # CLI Package Manager Unifier
 
-A unified command-line interface for managing both npm and pip3 packages from a single tool.
+A unified command-line interface for managing **npm**, **pip3**, **yarn**, and **pnpm** packages from a single tool — with built-in multi-provider security scanning.
 
 ## Features
 
-- **Unified Interface**: Manage npm and pip3 packages with a single CLI
-- **Smart Package Detection**: Automatically detects which manager a package belongs to
-- **Cross-Platform**: Works on Windows, Linux, and macOS
-- **Colorful Output**: Clear, color-coded feedback for all operations
-- **Update Checking**: Check for outdated packages across both managers
+- **Unified Interface** — manage four package managers (`npm`, `pip3`, `yarn`, `pnpm`) through one CLI
+- **Smart Package Detection** — automatically detects which manager(s) a package belongs to
+- **Multi-Provider Security Scanning** — checks packages against **VirusTotal**, **OSV.dev**, **GitHub Advisory**, and **OSS Index** before install/upgrade
+- **Scan Caching** — file-based TTL cache avoids redundant API calls
+- **JSON Security Reports** — every install/upgrade writes a detailed report to `security_reports/`
+- **Cross-Platform** — works on Windows, Linux, and macOS
+- **Colorful Output** — colour-coded feedback with spinners for long operations
 
 ## Installation
 
-### Option 1: Install as a Command (Recommended)
-
-Run the installation script:
+### Option 1: Install as a command (recommended)
 
 **Windows:**
 ```bash
 install.bat
 ```
 
-**Linux/macOS:**
+**Linux / macOS:**
 ```bash
-chmod +x install.sh
-./install.sh
+chmod +x install.sh && ./install.sh
 ```
 
 Or manually:
@@ -32,134 +31,149 @@ Or manually:
 pip install -e .
 ```
 
-After installation, you can use the `unified` command from anywhere:
+Then use `unified` from anywhere:
 ```bash
 unified list
-unified search requests
 unified install express -m npm
 ```
 
-### Option 2: Run Without Installation
+### Option 2: Run without installation
 
-You can run directly using Python:
 ```bash
 python unified.py list
 python unified.py search requests
-python unified.py install express -m npm
-```
-
-Or using the module:
-```bash
-python -m src.cli list
 ```
 
 ## Usage
 
-### List Installed Packages
+### List installed packages
 ```bash
-unified list
-```
-Shows all installed packages from both npm (global) and pip3.
-
-### Search for Packages
-```bash
-# Search across all managers
-unified search requests
-
-# Search in specific manager
-unified search express -m npm
-unified search django -m pip3
+unified list                  # all managers
+unified list -m pip3          # pip3 only
 ```
 
-### Install Packages
+### Search for packages
 ```bash
-# Install with specific manager
-unified install requests -m pip3
+unified search react          # search all managers
+unified search django -m pip3 # search one manager
+```
+
+### Install packages
+```bash
 unified install express -m npm
-
-# Interactive installation (prompts for manager selection)
-unified install lodash
-```
-
-### Check for Updates
-```bash
-# Check all outdated packages
-unified update
-
-# Check outdated packages in specific manager
-unified update -m npm
-unified update -m pip3
-```
-
-### Update Packages
-```bash
-# Auto-detects and updates from correct manager
-unified update pytest
-unified update express
-
-# If package exists in multiple managers, prompts for selection
-```
-
-### Upgrade Packages (Alternative)
-```bash
-# Upgrade with specific manager
-unified upgrade requests -m pip3
-unified upgrade express -m npm
-```
-
-## Examples
-
-```bash
-# List all installed packages
-unified list
-
-# Search for a package
-unified search react
-
-# Install React via npm
-unified install react -m npm
-
-# Check what needs updating
-unified update
-
-# Update a specific package
-unified update pytest
-
-# Install Python package
 unified install requests -m pip3
+unified install lodash          # prompts for manager if ambiguous
+unified install lodash --no-security   # skip security scan
+unified install flask --show-findings   # show top 10 findings in terminal
+unified install flask --show-findings 5 # show top 5 findings
 ```
+
+### Upgrade / update packages
+```bash
+unified upgrade requests -m pip3
+unified update express -m npm     # "update" is an alias for "upgrade"
+unified upgrade Werkzeug --show-findings 8
+```
+
+### Check for outdated packages
+```bash
+unified check_updates             # all managers
+unified check_updates -m npm      # npm only
+```
+
+### Uninstall packages
+```bash
+unified uninstall requests -m pip3
+unified uninstall lodash -m npm
+```
+
+### Other flags
+```bash
+unified --version          # print version and exit
+unified install foo --no-security   # skip security scanning
+unified upgrade foo --show-findings [N]  # print findings summary table
+```
+
+## Security Scanning
+
+Every `install` and `upgrade` command triggers a multi-provider security scan (unless `--no-security` is passed):
+
+| Provider | What it checks |
+|---|---|
+| **VirusTotal** | File-hash reputation (requires `VIRUSTOTAL_API_KEY` env var) |
+| **OSV.dev** | Open-source vulnerability database |
+| **GitHub Advisory** | GitHub's advisory database |
+| **OSS Index** | Sonatype OSS Index |
+
+**Decision policy:**
+
+| Condition | Action |
+|---|---|
+| Critical / malicious finding | **Block** — installation aborted |
+| Medium / high finding | **Warn** — proceed with caution message |
+| Clean + sufficient coverage | **Allow** |
+
+Scan results are cached in `.security_scan_cache.json` (default TTL 600 s) and a JSON report is written to `security_reports/`.
+
+Use `--show-findings` to print findings directly in the terminal during scan:
+- `--show-findings` shows top 10 findings
+- `--show-findings N` shows top `N` findings
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `VIRUSTOTAL_API_KEY` | API key for VirusTotal lookups (optional) |
 
 ## Requirements
 
-- Python 3.7 or higher
-- npm (optional, for npm package management)
-- pip3 (optional, for Python package management)
+- Python 3.8+
+- At least one of: `npm`, `pip3`, `yarn`, `pnpm`
 
 ## Dependencies
 
-- `colorama` - Cross-platform colored terminal output
-- `tabulate` - Pretty table formatting
-- `requests` - HTTP library for PyPI searches
+- `colorama` — coloured terminal output
+- `tabulate` — pretty table formatting
+- `requests` — HTTP client for registry / security API calls
 
 ## Architecture
 
 ```
 cli-package-manager-unifier/
 ├── src/
-│   ├── cli.py                 # Main CLI interface
-│   └── managers/
-│       ├── base_manager.py    # Abstract base class
-│       ├── npm_manager.py     # NPM implementation
-│       └── pip_manager.py     # Pip3 implementation
-├── unified.py                 # Entry point script
-├── setup.py                   # Installation configuration
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
+│   ├── cli.py                       # Main CLI (argparse + handlers)
+│   ├── managers/
+│   │   ├── base_manager.py          # Abstract base class + shared helpers
+│   │   ├── npm_manager.py           # npm implementation
+│   │   ├── pip_manager.py           # pip3 implementation
+│   │   ├── yarn_manager.py          # yarn implementation
+│   │   └── pnpm_manager.py          # pnpm implementation
+│   └── utils/
+│       ├── virustotal.py            # VirusTotal hash download + API
+│       ├── security_providers.py    # OSV / GitHub / OSS Index providers
+│       ├── security_aggregator.py   # Multi-provider scoring & decision
+│       ├── security_cache.py        # File-based TTL cache
+│       ├── security_report.py       # JSON report writer
+│       └── package_cache.py         # SQLite installed-package cache
+├── tests/                           # 72 pytest tests
+│   ├── conftest.py                  # Shared fixtures
+│   ├── test_managers.py             # Manager unit tests (31)
+│   ├── test_cli_handlers.py         # CLI handler tests (14)
+│   ├── test_phase1_cli.py           # CLI integration tests (7)
+│   ├── test_phase1_virustotal.py    # VirusTotal tests (3)
+│   ├── test_phase2_security_*.py    # Security provider/cache tests (9)
+│   └── test_security_report_and_cache.py  # Report & DB tests (6)
+├── unified.py                       # Entry-point script
+├── setup.py                         # Package configuration
+├── requirements.txt                 # Python dependencies
+└── .gitignore
 ```
 
-## Contributing
+## Running Tests
 
-Feel free to submit issues and enhancement requests!
+```bash
+pytest tests/ -v
+```
 
 ## License
 

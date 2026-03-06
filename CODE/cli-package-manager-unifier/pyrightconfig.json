@@ -1,5 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/docs/config.schema.json",
+  "include": [
+    "src",
+    "unified.py"
+  ],
   "typeCheckingMode": "basic",
   "reportMissingParameterType": false,
   "reportUnknownParameterType": false,
@@ -7,10 +11,10 @@
   "reportUnknownVariableType": false,
   "reportUnknownMemberType": false,
   "exclude": [
+    "tests/**",
     "**/__pycache__/**",
     "**/.venv/**",
     "**/venv/**",
-    "**/env/**",
-    "c:/Users/abhin/AppData/Local/Programs/Python/Python312/Lib/**"
+    "**/env/**"
   ]
 }

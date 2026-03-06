@@ -1,0 +1,209 @@
+{
+  "title": "CLI Package Manager Unifier - Cleaned Phase 1/2/3 Roadmap",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Core Expansion and Baseline Security",
+      "start": "2025-11-03",
+      "end": "2026-01-27",
+      "objectives": [
+        "Expand manager support with dependency-correct order",
+        "Add baseline multi-source security checks",
+        "Remove ambiguous scan messaging"
+      ],
+      "tasks": [
+        {
+          "id": "p1-t1",
+          "name": "Stabilize unified CLI operations for npm and pip",
+          "deliverable": "list/search/install/upgrade stable for npm and pip",
+          "dependsOn": []
+        },
+        {
+          "id": "p1-t2",
+          "name": "Add yarn manager support",
+          "deliverable": "yarn command parity with npm/pip",
+          "dependsOn": ["p1-t1"]
+        },
+        {
+          "id": "p1-t3",
+          "name": "Add pnpm manager support",
+          "deliverable": "pnpm command parity with npm/pip",
+          "dependsOn": ["p1-t2"]
+        },
+        {
+          "id": "p1-t4",
+          "name": "Add poetry manager support",
+          "deliverable": "poetry command parity with existing managers",
+          "dependsOn": ["p1-t3"]
+        },
+        {
+          "id": "p1-t5",
+          "name": "Add pipx manager support",
+          "deliverable": "pipx command parity with existing managers",
+          "dependsOn": ["p1-t4"]
+        },
+        {
+          "id": "p1-t6",
+          "name": "Integrate OSV API and keep VirusTotal active",
+          "deliverable": "dual-source baseline security checks",
+          "dependsOn": ["p1-t1"]
+        },
+        {
+          "id": "p1-t7",
+          "name": "Normalize scan verdict output",
+          "deliverable": "only block/warn/allow/not_scanned labels",
+          "dependsOn": ["p1-t6"]
+        },
+        {
+          "id": "p1-t8",
+          "name": "Expand cache schema and add baseline tests",
+          "deliverable": "multi-manager metadata + unit tests",
+          "dependsOn": ["p1-t5", "p1-t7"]
+        }
+      ],
+      "milestones": [
+        {
+          "name": "Demo 1",
+          "dateWindow": "2025-11-24 to 2025-11-28"
+        },
+        {
+          "name": "Demo 2 Documentation",
+          "date": "2026-01-27"
+        }
+      ],
+      "exitCriteria": [
+        "All six managers execute core commands on sample packages",
+        "Every install/upgrade emits deterministic verdict",
+        "No ambiguous undetected-only status"
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Reliability, UX, and Security Enrichment",
+      "start": "2026-01-28",
+      "end": "2026-02-27",
+      "objectives": [
+        "Improve reliability under partial failures",
+        "Expose decisions through terminal UX",
+        "Add provider enrichment and fallback"
+      ],
+      "tasks": [
+        {
+          "id": "p2-t1",
+          "name": "Add GitHub Advisory integration",
+          "deliverable": "third vulnerability source",
+          "dependsOn": ["phase-1"]
+        },
+        {
+          "id": "p2-t2",
+          "name": "Add OSS Index integration",
+          "deliverable": "fourth vulnerability source",
+          "dependsOn": ["p2-t1"]
+        },
+        {
+          "id": "p2-t3",
+          "name": "Implement aggregator and fallback policy",
+          "deliverable": "consolidated decision model with retries/timeouts",
+          "dependsOn": ["p2-t2"]
+        },
+        {
+          "id": "p2-t4",
+          "name": "Build terminal UI flow",
+          "deliverable": "manager selection, search, risk summary, action result",
+          "dependsOn": ["p2-t3"]
+        },
+        {
+          "id": "p2-t5",
+          "name": "Run reliability and edge-case tests",
+          "deliverable": "offline/outage test evidence and logs",
+          "dependsOn": ["p2-t4"]
+        },
+        {
+          "id": "p2-t6",
+          "name": "Execute repeatable experiment trials",
+          "deliverable": "5-10 run dataset with timing and error metrics",
+          "dependsOn": ["p2-t5"]
+        }
+      ],
+      "milestones": [
+        {
+          "name": "Demo 2 Review",
+          "date": "2026-02-27"
+        }
+      ],
+      "exitCriteria": [
+        "Provider failure still yields usable verdict",
+        "Terminal flow is complete and documented",
+        "Experiment outputs are reproducible"
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Final Quality, Evaluation, and Academic Outputs",
+      "start": "2026-02-28",
+      "end": "2026-04-27",
+      "objectives": [
+        "Finalize reliability and validation",
+        "Complete all assessed submissions",
+        "Ship polished final demo"
+      ],
+      "tasks": [
+        {
+          "id": "p3-t1",
+          "name": "Incorporate review feedback and final hardening",
+          "deliverable": "stability improvements and final reliability fixes",
+          "dependsOn": ["phase-2"]
+        },
+        {
+          "id": "p3-t2",
+          "name": "Complete user testing and usability iteration",
+          "deliverable": "validated UX updates with feedback evidence",
+          "dependsOn": ["p3-t1"]
+        },
+        {
+          "id": "p3-t3",
+          "name": "Finalize experiments and thesis results section",
+          "deliverable": "analyzed metrics and thesis-ready results",
+          "dependsOn": ["p3-t2"]
+        },
+        {
+          "id": "p3-t4",
+          "name": "Prepare poster and final demo assets",
+          "deliverable": "poster-ready content and rehearsal script",
+          "dependsOn": ["p3-t3"]
+        },
+        {
+          "id": "p3-t5",
+          "name": "Final bug-fix buffer and release freeze",
+          "deliverable": "stable final demo build",
+          "dependsOn": ["p3-t4"]
+        },
+        {
+          "id": "p3-t6",
+          "name": "Thesis final edit and submission",
+          "deliverable": "submitted thesis package",
+          "dependsOn": ["p3-t5"]
+        }
+      ],
+      "milestones": [
+        {
+          "name": "Poster",
+          "date": "2026-04-09"
+        },
+        {
+          "name": "Final Demo",
+          "date": "2026-04-16"
+        },
+        {
+          "name": "Thesis",
+          "date": "2026-04-27"
+        }
+      ],
+      "exitCriteria": [
+        "Final demo completes without critical blockers",
+        "Poster submitted on time",
+        "Thesis submitted on time"
+      ]
+    }
+  ]
+}
