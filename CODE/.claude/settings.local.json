@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -File experiments/run_timing.ps1)",
+      "Bash(mv run_timing.ps1 run_experiments.ps1 analyze_timing.py scripts/)",
+      "Bash(mv timing_raw_20260405_164735.csv data/raw/)",
+      "Bash(mv timing_20260405_164735_summary.csv timing_20260405_164735_report.txt data/processed/)",
+      "Bash(rm timing_raw_20260405_162426.csv timing_raw_20260405_162510.csv timing_raw_20260405_163420.csv timing_raw_20260405_163848.csv timing_raw_20260405_164307.csv)",
+      "Bash(python experiments/scripts/analyze_timing.py)"
+    ]
+  }
+}
