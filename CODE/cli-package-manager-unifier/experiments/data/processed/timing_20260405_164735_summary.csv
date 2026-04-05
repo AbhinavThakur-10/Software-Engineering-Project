@@ -1,0 +1,5 @@
+package,manager,native_median_s,unified_no_sec_median_s,scan_cold_median_s,scan_warm_median_s,manager_overhead_s,manager_overhead_pct,scan_overhead_s,total_cold_overhead_s,total_cold_overhead_pct,cache_speedup_s,cache_speedup_pct,reps_native,reps_unified_no_sec,reps_scan_cold,reps_scan_warm
+click,pip3,1.236,2.268,6.128,3.712,1.031,83.4,6.128,7.16,579.1,2.417,39.4,5,5,5,5
+express,npm,1.0,3.067,9.503,7.239,2.067,206.8,9.503,11.57,1157.6,2.264,23.8,5,5,5,5
+react,npm,0.738,2.628,8.557,6.339,1.89,256.1,8.557,10.447,1415.4,2.218,25.9,5,5,5,5
+requests,pip3,1.482,2.567,6.418,4.122,1.085,73.2,6.418,7.502,506.1,2.296,35.8,5,5,5,5

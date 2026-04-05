@@ -72,11 +72,14 @@ def test_show_findings_flag_defaults_to_10(monkeypatch):
     monkeypatch.setattr(BasePackageManager, "is_available", lambda self: False)
     captured = {}
 
-    def _fake_install(self, package_name, manager_name=None, *, skip_security=False, show_findings=0):
+    def _fake_install(
+        self, package_name, manager_name=None, *, skip_security=False, show_findings=0, force_security=False
+    ):
         captured["package_name"] = package_name
         captured["manager_name"] = manager_name
         captured["skip_security"] = skip_security
         captured["show_findings"] = show_findings
+        captured["force_security"] = force_security
 
     monkeypatch.setattr(UnifiedCLI, "install_package", _fake_install)
     monkeypatch.setattr("sys.argv", ["unified", "install", "requests", "--show-findings"])
@@ -90,11 +93,14 @@ def test_show_findings_flag_with_explicit_value(monkeypatch):
     monkeypatch.setattr(BasePackageManager, "is_available", lambda self: False)
     captured = {}
 
-    def _fake_upgrade(self, package_name, manager_name=None, *, skip_security=False, show_findings=0):
+    def _fake_upgrade(
+        self, package_name, manager_name=None, *, skip_security=False, show_findings=0, force_security=False
+    ):
         captured["package_name"] = package_name
         captured["manager_name"] = manager_name
         captured["skip_security"] = skip_security
         captured["show_findings"] = show_findings
+        captured["force_security"] = force_security
 
     monkeypatch.setattr(UnifiedCLI, "upgrade_package", _fake_upgrade)
     monkeypatch.setattr("sys.argv", ["unified", "upgrade", "requests", "--show-findings", "3"])

@@ -1,10 +1,12 @@
-"""Unified package manager CLI."""
+"""Supply-Chain Security Scanner - Multi-provider vulnerability aggregation."""
 import argparse
 import sys
 import threading
 import os
+from pathlib import Path
 from typing import Callable, Dict, List, Any, Optional, cast
 
+from dotenv import load_dotenv
 from colorama import init, Fore, Style
 from tabulate import tabulate
 
@@ -44,7 +46,7 @@ _SYMBOL_FAIL = "✗" if _supports_text("✗") else "[FAIL]"
 
 
 class UnifiedCLI:
-    """CLI for multiple package managers."""
+    """Security scanner CLI with multi-provider vulnerability aggregation."""
 
     def __init__(self) -> None:
         """Init managers and availability."""
@@ -124,13 +126,36 @@ class UnifiedCLI:
             return None
         return None
 
-    def _resolve_scan_version(self, package_name: str, manager_name: str) -> Optional[str]:
+    def _resolve_target_version_for_upgrade(
+        self, package_name: str, manager_name: str
+    ) -> Optional[str]:
+        """Version an upgrade would move to (registry \"latest\"), or installed if already current."""
+        manager = self.available_managers.get(manager_name)
+        if not manager:
+            return self._get_installed_version(package_name, manager_name)
+        try:
+            for row in manager.check_outdated():
+                if str(row.get("name", "")).lower() == package_name.lower():
+                    lat = row.get("latest") or row.get("latest_version")
+                    if lat:
+                        return str(lat).strip()
+        except Exception:
+            pass
+        return self._get_installed_version(package_name, manager_name)
+
+    def _resolve_scan_version(
+        self, package_name: str, manager_name: str, *, action: str = "install"
+    ) -> Optional[str]:
         """Resolve a package version for security scanning.
 
-        Priority:
-        1) Installed version from local manager package list.
-        2) Exact match from manager search results (registry/latest metadata).
+        *upgrade*: prefer the target (latest) version you are moving to, not only the installed one.
+        *install*: installed copy if present, else registry candidate from search.
         """
+        if action == "upgrade":
+            target = self._resolve_target_version_for_upgrade(package_name, manager_name)
+            if target:
+                return target
+
         installed = self._get_installed_version(package_name, manager_name)
         if installed:
             return installed
@@ -160,12 +185,14 @@ class UnifiedCLI:
     # Security helpers
     # ------------------------------------------------------------------
 
-    def _security_scan(self, package_name: str, manager_name: str) -> bool:
+    def _security_scan(
+        self, package_name: str, manager_name: str, action: str = "install"
+    ) -> bool:
         """Run aggregated security scan and return True if action may proceed."""
         try:
             print(
                 f"\n{Fore.CYAN}[Security]{Style.RESET_ALL} Running security scan "
-                f"for {package_name} ({manager_name})..."
+                f"for {package_name} ({manager_name}) [{action}]..."
             )
 
             stop_event = threading.Event()
@@ -175,6 +202,11 @@ class UnifiedCLI:
             )
 
             def _spin() -> None:
+                """Display a spinner while security scan is in progress.
+                
+                Runs in a separate thread and checks stop_event periodically.
+                Cycles through spinner symbols to show activity.
+                """
                 symbols = ["|", "/", "-", "\\"]
                 idx = 0
                 while not stop_event.is_set():
@@ -190,7 +222,9 @@ class UnifiedCLI:
             stop_event.set()
             t.join()
 
-            installed_version = self._resolve_scan_version(package_name, manager_name)
+            installed_version = self._resolve_scan_version(
+                package_name, manager_name, action=action
+            )
 
             result = self.security_aggregator.analyze(
                 package_name=package_name,
@@ -456,8 +490,9 @@ class UnifiedCLI:
         *,
         skip_security: bool = False,
         show_findings: int = 0,
+        force_security: bool = False,
     ) -> None:
-        """Run security scan → execute *operation* → emit report.
+        """Run security scan, execute *operation*, emit report.
 
         This single helper replaces the previously duplicated logic in
         install_package, upgrade_package, and update_package.
@@ -466,39 +501,21 @@ class UnifiedCLI:
         if not skip_security:
             self._findings_display_limit = max(0, int(show_findings or 0))
             try:
-                may_proceed = self._security_scan(package_name, manager_name)
+                may_proceed = self._security_scan(package_name, manager_name, action)
 
                 # Optional pre-action markdown export prompt (must come before proceed confirmation)
                 if action in ("install", "upgrade"):
                     self._offer_markdown_report_before_action(action, package_name, manager_name)
 
                 if not may_proceed:
-                    self._emit_security_report(
-                        action=action,
-                        package_name=package_name,
-                        manager_name=manager_name,
-                        operation_status="blocked",
-                        operation_success=False,
-                        scan_result=self._last_security_scan,
-                    )
-                    return
-
-                decision = str((self._last_security_scan or {}).get("decision", "allow")).lower()
-                if decision == "warn":
-                    try:
-                        choice = (
-                            input(
-                                f"{Fore.YELLOW}Security warning detected. Proceed anyway? (y/n): "
-                                f"{Style.RESET_ALL}"
-                            )
-                            .strip()
-                            .lower()
+                    decision = str((self._last_security_scan or {}).get("decision", "allow")).lower()
+                    if force_security and decision == "block":
+                        print(
+                            f"{Fore.RED}[Security]{Style.RESET_ALL} "
+                            "--force: overriding BLOCK (critical / malicious). Proceed at your own risk."
                         )
-                    except (EOFError, OSError):
-                        choice = "n"
-
-                    if choice != "y":
-                        print(f"{Fore.RED}[Security]{Style.RESET_ALL} Action cancelled by user.")
+                        may_proceed = True
+                    else:
                         self._emit_security_report(
                             action=action,
                             package_name=package_name,
@@ -509,7 +526,39 @@ class UnifiedCLI:
                         )
                         return
 
-                    print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Proceeding despite warning.")
+                decision = str((self._last_security_scan or {}).get("decision", "allow")).lower()
+                if decision == "warn":
+                    if force_security:
+                        print(
+                            f"{Fore.YELLOW}[Security]{Style.RESET_ALL} "
+                            "--force: skipping confirmation for security WARN."
+                        )
+                    else:
+                        try:
+                            choice = (
+                                input(
+                                    f"{Fore.YELLOW}Security warning detected. Proceed anyway? (y/n): "
+                                    f"{Style.RESET_ALL}"
+                                )
+                                .strip()
+                                .lower()
+                            )
+                        except (EOFError, OSError):
+                            choice = "n"
+
+                        if choice != "y":
+                            print(f"{Fore.RED}[Security]{Style.RESET_ALL} Action cancelled by user.")
+                            self._emit_security_report(
+                                action=action,
+                                package_name=package_name,
+                                manager_name=manager_name,
+                                operation_status="blocked",
+                                operation_success=False,
+                                scan_result=self._last_security_scan,
+                            )
+                            return
+
+                        print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Proceeding despite warning.")
             finally:
                 self._findings_display_limit = 0
 
@@ -568,9 +617,13 @@ class UnifiedCLI:
 
         all_packages: List[Dict[str, Any]] = []
 
+        empty_global_managers: List[str] = []
+
         for mgr_name, manager in self.available_managers.items():
             print(f"\n{Fore.CYAN}Fetching packages from {mgr_name}...{Style.RESET_ALL}")
             packages = manager.list_packages()
+            if not packages and mgr_name in {"yarn", "pnpm"}:
+                empty_global_managers.append(mgr_name)
 
             latest_map: Dict[str, str] = {}
             try:
@@ -620,6 +673,13 @@ class UnifiedCLI:
                     tablefmt="grid",
                 )
             )
+            if empty_global_managers:
+                print(
+                    f"\n{Fore.YELLOW}Note:{Style.RESET_ALL} "
+                    f"{', '.join(empty_global_managers)} reported no packages — "
+                    "this CLI only lists **global** installs for yarn/pnpm. "
+                    "Project-local dependencies are not shown."
+                )
         else:
             print(f"{Fore.YELLOW}No packages found{Style.RESET_ALL}")
 
@@ -630,6 +690,7 @@ class UnifiedCLI:
         *,
         skip_security: bool = False,
         show_findings: int = 0,
+        force_security: bool = False,
     ) -> None:
         """Install via given or interactively selected manager."""
         resolved = self._resolve_manager(manager_name) if manager_name else self._prompt_manager()
@@ -640,6 +701,7 @@ class UnifiedCLI:
             "install", package_name, resolved, manager.install_package,
             skip_security=skip_security,
             show_findings=show_findings,
+            force_security=force_security,
         )
 
     def upgrade_package(
@@ -649,6 +711,7 @@ class UnifiedCLI:
         *,
         skip_security: bool = False,
         show_findings: int = 0,
+        force_security: bool = False,
     ) -> None:
         """Upgrade to latest version (explicit manager or interactive)."""
         if manager_name:
@@ -684,7 +747,90 @@ class UnifiedCLI:
             "upgrade", package_name, resolved, manager.upgrade_package,
             skip_security=skip_security,
             show_findings=show_findings,
+            force_security=force_security,
         )
+
+    def upgrade_all_dry_run(
+        self,
+        manager_name: Optional[str] = None,
+        *,
+        show_findings: int = 0,
+    ) -> int:
+        """Scan every outdated package (upgrade target versions) without installing. Returns exit code."""
+        if not self.available_managers:
+            print(f"{Fore.RED}No package managers available!{Style.RESET_ALL}")
+            return 2
+
+        if manager_name:
+            resolved = self._resolve_manager(manager_name)
+            if not resolved:
+                return 2
+            managers_to_check = {resolved: self.available_managers[resolved]}
+        else:
+            managers_to_check = dict(self.available_managers)
+
+        all_outdated: List[Dict[str, Any]] = []
+        for name, manager in managers_to_check.items():
+            print(f"\n{Fore.CYAN}Collecting outdated packages from {name}...{Style.RESET_ALL}")
+            try:
+                all_outdated.extend(manager.check_outdated())
+            except Exception as ex:
+                print(f"{Fore.YELLOW}Warning: could not list outdated for {name}: {ex}{Style.RESET_ALL}")
+
+        if not all_outdated:
+            print(f"\n{Fore.GREEN}{_SYMBOL_OK} No outdated packages — nothing to dry-run.{Style.RESET_ALL}")
+            return 0
+
+        print(
+            f"\n{Fore.CYAN}[Security]{Style.RESET_ALL} Dry-run: scanning {len(all_outdated)} "
+            f"outdated package(s) at target (latest) versions (no upgrades performed).\n"
+        )
+
+        any_risk = False
+        summary_rows: List[List[Any]] = []
+        self._findings_display_limit = max(0, int(show_findings or 0))
+
+        for row in all_outdated:
+            pkg = str(row.get("name", ""))
+            mgr = str(row.get("manager", ""))
+            cur = str(row.get("current", ""))
+            latest = str(row.get("latest") or row.get("latest_version") or "")
+            if not pkg or mgr not in self.available_managers:
+                continue
+
+            print(f"{Fore.CYAN}--- {pkg} ({mgr}) {cur} → {latest}{Style.RESET_ALL}")
+            try:
+                allowed = self._security_scan(pkg, mgr, "upgrade")
+            except Exception as ex:
+                print(f"{Fore.RED}[Security]{Style.RESET_ALL} Scan error: {ex}")
+                summary_rows.append([pkg, mgr, "error", str(ex)[:80]])
+                any_risk = True
+                continue
+
+            scan = self._last_security_scan or {}
+            decision = str(scan.get("decision", "unknown")).lower()
+            if not allowed or decision in ("block", "warn"):
+                any_risk = True
+            summary_rows.append([pkg, mgr, decision, str(scan.get("reason", ""))[:80]])
+
+        self._findings_display_limit = 0
+
+        print(f"\n{Fore.CYAN}[Security]{Style.RESET_ALL} Dry-run summary:")
+        print(
+            tabulate(
+                summary_rows,
+                headers=["Package", "Manager", "Decision", "Reason"],
+                tablefmt="grid",
+            )
+        )
+        if any_risk:
+            print(
+                f"{Fore.YELLOW}[Security]{Style.RESET_ALL} "
+                "Exit code 1: at least one BLOCK/WARN/ERROR (useful for CI gates)."
+            )
+            return 1
+        print(f"{Fore.GREEN}[Security]{Style.RESET_ALL} Exit code 0: all ALLOW.{Style.RESET_ALL}")
+        return 0
 
     def uninstall_package(
         self,
@@ -873,20 +1019,37 @@ def _print_help() -> None:
     print("  • pnpm (pnpm Package Manager)\n")
 
 
+def _load_env_files() -> None:
+    """Load `.env`: cwd first, then package root (parent of `src/`), so CLI works when cwd != project dir."""
+    load_dotenv()
+    pkg_root = Path(__file__).resolve().parent.parent
+    load_dotenv(pkg_root / ".env")
+
+
 def main() -> None:
     """CLI entry point."""
+    _load_env_files()
+
     parser = argparse.ArgumentParser(
-        description="Unified Package Manager CLI",
+        description="Supply-Chain Security Scanner - Multi-provider vulnerability aggregation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Security Scanning:
+    Every install/upgrade checks packages against 4 security providers:
+    - OSV.dev (open-source vulnerability database)
+    - GitHub Advisory (GitHub-tracked CVEs)
+    - OSS Index (Sonatype intelligence)
+    - VirusTotal (file-hash malware reputation)
+
+    Decisions: BLOCK (critical/malicious), WARN (medium/high), ALLOW (clean)
+    Use --force to override BLOCK or skip WARN prompts (like pip-audit-style gates).
+
 Examples:
+    %(prog)s install requests -m pip3    # Install with security scan
+    %(prog)s upgrade flask --show-findings  # Show vulnerability findings
+    %(prog)s install lodash --no-security   # Skip security scan
+    %(prog)s upgrade --all --dry-run   # Audit all outdated packages (CI exit code)
     %(prog)s list                        # List all packages
-    %(prog)s install express -m npm      # Install with specific manager
-    %(prog)s search django               # Search for packages
-    %(prog)s upgrade                     # List outdated packages
-    %(prog)s upgrade pytest              # Upgrade (auto-detect manager)
-    %(prog)s update pytest               # Alias for upgrade
-    %(prog)s uninstall lodash -m npm     # Remove a package
         """,
     )
 
@@ -916,6 +1079,25 @@ Examples:
         default=0,
         metavar="N",
         help="Show top N security findings in terminal (default: 10 when provided without N)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Override security BLOCK and skip WARN confirmation (install/upgrade only)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="With 'upgrade --all': run security scans on outdated packages without upgrading",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="upgrade_all",
+        default=False,
+        help="With 'upgrade': target all outdated packages (requires --dry-run)",
     )
     parser.add_argument(
         "-V",
@@ -952,6 +1134,7 @@ Examples:
             args.manager,
             skip_security=args.no_security,
             show_findings=args.show_findings,
+            force_security=args.force,
         )
 
     elif args.command == "search":
@@ -962,6 +1145,24 @@ Examples:
 
     elif args.command in ("upgrade", "update"):
         if not args.package:
+            if args.upgrade_all:
+                if args.dry_run:
+                    code = cli.upgrade_all_dry_run(
+                        args.manager,
+                        show_findings=args.show_findings,
+                    )
+                    sys.exit(code)
+                print(
+                    f"{Fore.YELLOW}upgrade --all requires --dry-run "
+                    f"(bulk upgrade is not implemented).{Style.RESET_ALL}"
+                )
+                sys.exit(1)
+            if args.dry_run:
+                print(
+                    f"{Fore.YELLOW}Use: unified upgrade --all --dry-run "
+                    f"to audit outdated packages.{Style.RESET_ALL}"
+                )
+                sys.exit(1)
             cli.check_updates(args.manager)
             sys.exit(0)
         if _is_placeholder(args.package.strip()):
@@ -975,6 +1176,7 @@ Examples:
             args.manager,
             skip_security=args.no_security,
             show_findings=args.show_findings,
+            force_security=args.force,
         )
 
     elif args.command == "uninstall":

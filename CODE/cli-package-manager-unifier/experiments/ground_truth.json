@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "description": "Ground truth vulnerability labels for experiment packages",
+    "created": "2025-04-04",
+    "labeling_sources": [
+      "NVD (nvd.nist.gov)",
+      "Snyk Vulnerability Database",
+      "GitHub Security Advisories",
+      "Package Changelogs"
+    ],
+    "notes": "Labels based on package versions commonly installed as of April 2025"
+  },
+  "packages": [
+    {
+      "name": "react",
+      "manager": "npm",
+      "version": "18.2.0",
+      "ground_truth_vulnerable": 0,
+      "notes": "No known CVEs in recent versions"
+    },
+    {
+      "name": "lodash",
+      "manager": "npm",
+      "version": "4.17.21",
+      "ground_truth_vulnerable": 1,
+      "known_cves": [
+        "CVE-2020-8203 (Prototype Pollution)",
+        "CVE-2020-28500 (ReDoS)",
+        "CVE-2021-23337 (Command Injection)"
+      ],
+      "notes": "Historical vulnerabilities in older versions; 4.17.21 patches most but may still trigger advisories"
+    },
+    {
+      "name": "express",
+      "manager": "npm",
+      "version": "4.18.2",
+      "ground_truth_vulnerable": 0,
+      "notes": "No known CVEs in recent versions"
+    },
+    {
+      "name": "requests",
+      "manager": "pip3",
+      "version": "2.31.0",
+      "ground_truth_vulnerable": 0,
+      "notes": "No known CVEs in recent versions"
+    },
+    {
+      "name": "flask",
+      "manager": "pip3",
+      "version": "3.0.0",
+      "ground_truth_vulnerable": 0,
+      "notes": "No known CVEs in recent versions"
+    },
+    {
+      "name": "werkzeug",
+      "manager": "pip3",
+      "version": "2.2.2",
+      "ground_truth_vulnerable": 1,
+      "known_cves": [
+        "CVE-2023-25577 (Debugger PIN Weakness)",
+        "CVE-2023-23934 (Cookie Parsing)"
+      ],
+      "notes": "Multiple CVEs in versions < 2.2.3"
+    }
+  ],
+  "labeling_criteria": {
+    "vulnerable_conditions": [
+      "Package version has known CVE in NVD",
+      "Package version listed in GitHub Security Advisory",
+      "Package version has Snyk vulnerability entry"
+    ],
+    "safe_conditions": [
+      "No CVEs found in NVD for version",
+      "No GitHub Security Advisories for version",
+      "Package maintainers confirm version is safe"
+    ]
+  }
+}

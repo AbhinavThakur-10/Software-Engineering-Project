@@ -85,6 +85,7 @@ class PipManager(BasePackageManager):
         try:
             import requests
             
+            # try direct package lookup first (faster)
             url = f"https://pypi.org/pypi/{query}/json"
             
             try:
@@ -99,6 +100,7 @@ class PipManager(BasePackageManager):
                         'manager': 'pip3'
                     }]
                 else:
+                    # fall back to warehouse search
                     return self._search_pypi_warehouse(query, limit)
             
             except requests.RequestException:
@@ -121,6 +123,7 @@ class PipManager(BasePackageManager):
             if response.status_code == 200:
                 import re
                 
+                # extract package names from HTML
                 pattern = r'<a class="package-snippet".*?href="/project/(.*?)/"'
                 matches = re.findall(pattern, response.text)
                 
@@ -206,6 +209,7 @@ class PipManager(BasePackageManager):
             if result.returncode != 0:
                 return {}
             
+            # parse key-value pairs from pip show output
             info = {}
             for line in result.stdout.split('\n'):
                 if ':' in line:

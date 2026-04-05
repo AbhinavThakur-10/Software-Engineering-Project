@@ -17,7 +17,7 @@ def cli(monkeypatch):
     monkeypatch.setattr(BasePackageManager, "is_available", lambda self: True)
     instance = UnifiedCLI()
     # Stub security scan to always allow
-    monkeypatch.setattr(instance, "_security_scan", lambda pkg, mgr: True)
+    monkeypatch.setattr(instance, "_security_scan", lambda pkg, mgr, *a, **k: True)
     instance._last_security_scan = {"decision": "allow", "reason": "test", "coverage": 4, "counts": {}, "findings": [], "providers": {}}
     return instance
 
@@ -50,7 +50,7 @@ class TestInstallPackage:
     def test_install_blocked_by_security(self, monkeypatch, capsys):
         monkeypatch.setattr(BasePackageManager, "is_available", lambda self: True)
         cli2 = UnifiedCLI()
-        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr: False)
+        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr, *a, **k: False)
         cli2._last_security_scan = {"decision": "block", "reason": "test", "coverage": 0, "counts": {}, "findings": [], "providers": {}}
         cli2.install_package("malicious-pkg", "npm")
         out = capsys.readouterr().out
@@ -287,7 +287,7 @@ class TestMarkdownPrompt:
     def test_install_prompt_yes_saves_markdown_report(self, monkeypatch, capsys):
         monkeypatch.setattr(BasePackageManager, "is_available", lambda self: True)
         cli2 = UnifiedCLI()
-        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr: True)
+        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr, *a, **k: True)
         cli2._last_security_scan = {
             "decision": "warn",
             "reason": "test",
@@ -308,7 +308,7 @@ class TestMarkdownPrompt:
     def test_install_prompt_no_does_not_save_markdown_report(self, monkeypatch, capsys):
         monkeypatch.setattr(BasePackageManager, "is_available", lambda self: True)
         cli2 = UnifiedCLI()
-        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr: True)
+        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr, *a, **k: True)
         cli2._last_security_scan = {
             "decision": "allow",
             "reason": "test",
@@ -330,7 +330,7 @@ class TestMarkdownPrompt:
     def test_upgrade_prompt_yes_saves_markdown_report(self, monkeypatch, capsys):
         monkeypatch.setattr(BasePackageManager, "is_available", lambda self: True)
         cli2 = UnifiedCLI()
-        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr: True)
+        monkeypatch.setattr(cli2, "_security_scan", lambda pkg, mgr, *a, **k: True)
         cli2._last_security_scan = {
             "decision": "warn",
             "reason": "test",
@@ -356,7 +356,7 @@ class TestMarkdownPrompt:
 
         call_order = []
 
-        def _fake_security_scan(pkg, mgr):
+        def _fake_security_scan(pkg, mgr, *a, **k):
             cli2._last_security_scan = {
                 "decision": "warn",
                 "reason": "test",

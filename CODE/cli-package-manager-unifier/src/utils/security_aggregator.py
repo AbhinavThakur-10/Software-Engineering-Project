@@ -24,6 +24,7 @@ class SecurityAggregator:
 
     def _provider_config_fingerprint(self) -> str:
         """Return cache fingerprint for provider auth-related configuration."""
+        # track which APIs are configured to avoid cache hits with different auth states
         github_token_set = "1" if os.environ.get("GITHUB_TOKEN") else "0"
         oss_auth_set = "1" if (os.environ.get("OSSINDEX_USERNAME") and os.environ.get("OSSINDEX_TOKEN")) else "0"
         vt_key_set = "1" if self.api_key else "0"
@@ -45,7 +46,7 @@ class SecurityAggregator:
     ) -> Dict[str, Dict[str, Any]]:
         providers: Dict[str, Dict[str, Any]] = {
             "osv": scan_with_osv(package_name, manager, version),
-            "github_advisory": scan_with_github_advisory(package_name, manager),
+            "github_advisory": scan_with_github_advisory(package_name, manager, version),
             "oss_index": scan_with_oss_index(package_name, manager, version),
             "virustotal": scan_with_virustotal(file_hash, self.api_key),
         }
@@ -104,9 +105,11 @@ class SecurityAggregator:
         key = self._cache_key(package_name, manager, version, file_hash)
         cached = self.cache.get(key)
         if cached:
+            # return cached result if still fresh
             cached["from_cache"] = True
             return cached
 
+        # run all security providers and aggregate
         providers = self._collect_provider_results(package_name, manager, version, file_hash)
         score = self._score(providers)
 

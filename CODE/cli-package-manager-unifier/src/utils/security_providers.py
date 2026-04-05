@@ -11,6 +11,14 @@ from src.utils.virustotal import scan_file_hash_with_virustotal
 
 
 def _severity_from_cvss(score: Optional[float]) -> str:
+    """Convert a CVSS score to a severity level.
+
+    Args:
+        score (Optional[float]): The CVSS score.
+
+    Returns:
+        str: The severity level. One of "critical", "high", "medium", "low", or "unknown".
+    """
     if score is None:
         return "unknown"
     if score >= 9.0:
@@ -25,6 +33,7 @@ def _severity_from_cvss(score: Optional[float]) -> str:
 
 
 def _request_with_retries(
+    
     method: str,
     url: str,
     *,
@@ -35,6 +44,7 @@ def _request_with_retries(
     timeout: int = 12,
     retries: int = 2,
 ) -> Dict[str, Any]:
+    """Make HTTP request with automatic retry logic for transient failures."""
     last_error: Optional[str] = None
     for attempt in range(retries + 1):
         try:
@@ -50,10 +60,12 @@ def _request_with_retries(
         except requests.RequestException as ex:
             last_error = str(ex)
             if attempt < retries:
+                # exponential backoff
                 time.sleep(0.4 * (attempt + 1))
                 continue
             return {"ok": False, "status": "error", "error": last_error}
 
+        # handle rate limiting (429)
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After", "1")
             try:
@@ -65,6 +77,7 @@ def _request_with_retries(
                 continue
             return {"ok": False, "status": "rate_limited", "error": response.text}
 
+        # retry server errors (500+)
         if response.status_code >= 500 and attempt < retries:
             time.sleep(0.4 * (attempt + 1))
             continue
@@ -86,6 +99,14 @@ def _request_with_retries(
 
 
 def manager_to_ecosystem(manager: str) -> Optional[str]:
+    """Convert a package manager name to its corresponding ecosystem.
+
+    Args:
+        manager (str): The package manager name.
+
+    Returns:
+        Optional[str]: The corresponding ecosystem name, or None if unsupported.
+    """
     manager_lower = manager.lower()
     if manager_lower in {"npm", "yarn", "pnpm"}:
         return "npm"
@@ -95,6 +116,14 @@ def manager_to_ecosystem(manager: str) -> Optional[str]:
 
 
 def manager_to_github_ecosystem(manager: str) -> Optional[str]:
+    """Convert a package manager name to its corresponding GitHub ecosystem.
+
+    Args:
+        manager (str): The package manager name.
+
+    Returns:
+        Optional[str]: The corresponding GitHub ecosystem name, or None if unsupported.
+    """
     manager_lower = manager.lower()
     if manager_lower in {"npm", "yarn", "pnpm"}:
         return "npm"
@@ -104,7 +133,9 @@ def manager_to_github_ecosystem(manager: str) -> Optional[str]:
 
 
 def scan_with_osv(package_name: str, manager: str, version: Optional[str] = None) -> Dict[str, Any]:
+    """Query OSV database for known vulnerabilities."""
     ecosystem = manager_to_ecosystem(manager)
+
     if not ecosystem:
         return {"provider": "osv", "status": "unavailable", "findings": [], "error": "Unsupported ecosystem"}
 
@@ -132,6 +163,7 @@ def scan_with_osv(package_name: str, manager: str, version: Optional[str] = None
         summary = vuln.get("summary") or vuln.get("details") or "OSV vulnerability"
         severity = "unknown"
 
+        # parse CVSS score from severity field
         sev_items = vuln.get("severity", [])
         if isinstance(sev_items, list) and sev_items:
             first = sev_items[0]
@@ -154,7 +186,10 @@ def scan_with_osv(package_name: str, manager: str, version: Optional[str] = None
     return {"provider": "osv", "status": "ok", "findings": findings}
 
 
-def scan_with_github_advisory(package_name: str, manager: str) -> Dict[str, Any]:
+def scan_with_github_advisory(
+    package_name: str, manager: str, version: Optional[str] = None
+) -> Dict[str, Any]:
+    """Query GitHub Advisory Database for security advisories."""
     ecosystem = manager_to_github_ecosystem(manager)
     if not ecosystem:
         return {"provider": "github_advisory", "status": "unavailable", "findings": [], "error": "Unsupported ecosystem"}
@@ -167,12 +202,19 @@ def scan_with_github_advisory(package_name: str, manager: str) -> Dict[str, Any]
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    # Public endpoint; may return limited results/rate limits without token.
+    # scope to specific version if provided to avoid false positives
+    affects = package_name
+    if version:
+        ver = str(version).strip()
+        if ver:
+            affects = f"{package_name}@{ver}"
+
+    # query public GitHub Advisory API
     response = _request_with_retries(
         "GET",
         "https://api.github.com/advisories",
         headers=headers,
-        params={"ecosystem": ecosystem, "affects": package_name, "per_page": 20},
+        params={"ecosystem": ecosystem, "affects": affects, "per_page": 100},
     )
 
     if not response.get("ok"):
@@ -266,6 +308,7 @@ def scan_with_oss_index(package_name: str, manager: str, version: Optional[str] 
 
 
 def scan_with_virustotal(file_hash: Optional[str], api_key: str) -> Dict[str, Any]:
+    """Scan file hash against VirusTotal database."""
     if not file_hash:
         return {
             "provider": "virustotal",
@@ -283,6 +326,7 @@ def scan_with_virustotal(file_hash: Optional[str], api_key: str) -> Dict[str, An
             "error": str(result.get("message") if isinstance(result, dict) else "Unknown error"),
         }
 
+    # extract scan statistics from VT response
     attributes = ((result.get("data") or {}).get("attributes") or {}) if isinstance(result.get("data"), dict) else {}
     stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes, dict) else {}
 

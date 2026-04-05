@@ -26,6 +26,7 @@ class PackageCacheDB:
             ''')
 
     def add_package(self, name: str, version: str, manager: str):
+        """Add a package to the cache, skip if already exists."""
         with self.conn:
             self.conn.execute(
                 'INSERT OR IGNORE INTO installed_packages (name, version, manager) VALUES (?, ?, ?)',
@@ -46,4 +47,4 @@ class PackageCacheDB:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-        return False
+        return False  # don't suppress exceptions

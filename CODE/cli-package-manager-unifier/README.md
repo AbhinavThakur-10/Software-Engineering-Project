@@ -1,16 +1,31 @@
-# CLI Package Manager Unifier
+# Supply-Chain Security Scanner
 
-A unified command-line interface for managing **npm**, **pip3**, **yarn**, and **pnpm** packages from a single tool — with built-in multi-provider security scanning.
+A **multi-provider vulnerability aggregation** tool that checks packages against **4 independent security providers** before installation — giving you higher confidence than any single-provider solution.
 
-## Features
+## Why Multi-Provider?
 
-- **Unified Interface** — manage four package managers (`npm`, `pip3`, `yarn`, `pnpm`) through one CLI
-- **Smart Package Detection** — automatically detects which manager(s) a package belongs to
-- **Multi-Provider Security Scanning** — checks packages against **VirusTotal**, **OSV.dev**, **GitHub Advisory**, and **OSS Index** before install/upgrade
-- **Scan Caching** — file-based TTL cache avoids redundant API calls
-- **JSON Security Reports** — every install/upgrade writes a detailed report to `security_reports/`
+Single-provider vulnerability scanners miss threats. Each security database has different coverage:
+
+| Provider | Strength |
+|----------|----------|
+| **OSV.dev** | Comprehensive open-source vulnerability database |
+| **GitHub Advisory** | Fast disclosure of GitHub-tracked CVEs |
+| **OSS Index** | Sonatype's commercial-grade intelligence |
+| **VirusTotal** | File-hash malware reputation (60+ AV engines) |
+
+Our **aggregation strategy** combines all four providers and makes intelligent decisions:
+- **BLOCK** — Critical/malicious findings → installation aborted
+- **WARN** — Medium/high severity → proceed with caution
+- **ALLOW** — Clean + sufficient coverage → safe to install
+
+## Key Features
+
+- **Multi-Provider Aggregation** — combines 4 security providers for maximum coverage
+- **Intelligent Decision Policy** — BLOCK/WARN/ALLOW based on severity and coverage
+- **Caching** — TTL-based cache avoids redundant API calls
+- **Detailed Reports** — JSON + Markdown reports in `security_reports/`
 - **Cross-Platform** — works on Windows, Linux, and macOS
-- **Colorful Output** — colour-coded feedback with spinners for long operations
+- **Multi-Manager Support** — works with `npm`, `pip3`, `yarn`, and `pnpm`
 
 ## Installation
 
@@ -121,9 +136,15 @@ Use `--show-findings` to print findings directly in the terminal during scan:
 
 ## Environment Variables
 
-| Variable | Purpose |
-|---|---|
-| `VIRUSTOTAL_API_KEY` | API key for VirusTotal lookups (optional) |
+Copy `.env.example` to `.env` and configure your API keys:
+
+| Variable | Purpose | Required |
+|---|---|---|
+| `VIRUSTOTAL_API_KEY` | File-hash reputation checks | Recommended |
+| `OSSINDEX_USERNAME` | OSS Index authentication | Recommended |
+| `OSSINDEX_TOKEN` | OSS Index authentication | Recommended |
+| `GITHUB_TOKEN` | Increases GitHub API rate limits | Optional |
+| `SECURITY_CACHE_TTL_SECONDS` | Cache TTL in seconds (default: 600) | Optional |
 
 ## Requirements
 

@@ -12,7 +12,7 @@ class SecurityScanCache:
 
     def __init__(self, cache_file: Optional[str] = None, ttl_seconds: int = 600) -> None:
         self.cache_file = cache_file or os.path.join(os.getcwd(), ".security_scan_cache.json")
-        self.ttl_seconds = ttl_seconds
+        self.ttl_seconds = ttl_seconds  # default 10 minutes
 
     def _load(self) -> Dict[str, Any]:
         if not os.path.isfile(self.cache_file):
@@ -38,6 +38,7 @@ class SecurityScanCache:
             return None
 
         expires_at = item.get("expires_at", 0)
+        # check if entry has expired
         if not isinstance(expires_at, (int, float)) or time.time() > expires_at:
             data.pop(key, None)
             self._save(data)
@@ -49,6 +50,7 @@ class SecurityScanCache:
     def set(self, key: str, value: Dict[str, Any], ttl_seconds: Optional[int] = None) -> None:
         data = self._load()
         ttl = ttl_seconds if ttl_seconds is not None else self.ttl_seconds
+        # store with expiration timestamp
         data[key] = {
             "expires_at": time.time() + max(1, int(ttl)),
             "value": value,

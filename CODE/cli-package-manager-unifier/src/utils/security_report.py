@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 
 def _safe_slug(value: str) -> str:
+    """Convert string to safe filename by removing special chars."""
     return re.sub(r"[^a-zA-Z0-9_.@-]+", "_", value.strip())
 
 
@@ -69,6 +70,7 @@ def write_security_report_markdown(
     counts = scan_result.get("counts", {}) if isinstance(scan_result, dict) else {}
     findings = scan_result.get("findings", []) if isinstance(scan_result, dict) else []
 
+    # build markdown sections
     lines = [
         "# Security Report",
         "",
@@ -97,6 +99,7 @@ def write_security_report_markdown(
         lines.append("| Severity | Source | ID | Summary |")
         lines.append("|---|---|---|---|")
         for finding in findings:
+            # escape pipe characters for markdown tables
             severity = str(finding.get("severity", "unknown")).replace("|", "\\|")
             source = str(finding.get("source", "unknown")).replace("|", "\\|")
             finding_id = str(finding.get("id", "unknown")).replace("|", "\\|")

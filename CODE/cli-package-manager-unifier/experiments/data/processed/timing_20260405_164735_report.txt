@@ -1,0 +1,51 @@
+========================================================================
+  Track 1: Installation Overhead — Timing Report
+  Generated : 2026-04-05 17:01:12
+  Source    : timing_raw_20260405_164735.csv
+========================================================================
+
+Conditions
+----------
+  native          Raw npm/pip install (pure baseline)
+  unified_no_sec  Unified CLI install, --no-security flag (dispatch + DB only)
+  scan_cold       Security scan only — cold cache (upgrade, declined)
+  scan_warm       Security scan only — warm cache (upgrade, declined)
+
+All times are MEDIANS in seconds.
+
+Table 1 — Raw Medians (seconds)
+------------------------------------------------------------------------
+Package        Mgr      native   no_sec     cold     warm
+------------------------------------------------------------------------
+click          pip3      1.236    2.268    6.128    3.712
+express        npm       1.000    3.067    9.503    7.239
+react          npm       0.738    2.628    8.557    6.339
+requests       pip3      1.482    2.567    6.418    4.122
+
+Table 2 — Overhead Breakdown
+------------------------------------------------------------------------
+Package        Mgr      mgr_ovhd_s   mgr_ovhd_%  scan_ovhd_s  total_cold_s  total_cold_%
+------------------------------------------------------------------------
+click          pip3          1.031         83.4        6.128         7.160         579.1
+express        npm           2.067        206.8        9.503        11.570        1157.6
+react          npm           1.890        256.1        8.557        10.447        1415.4
+requests       pip3          1.085         73.2        6.418         7.502         506.1
+
+Table 3 — Cache Speedup
+------------------------------------------------------------------------
+Package        Mgr      cold_s   warm_s  saved_s  speedup_%
+------------------------------------------------------------------------
+click          pip3      6.128    3.712    2.417       39.4
+express        npm       9.503    7.239    2.264       23.8
+react          npm       8.557    6.339    2.218       25.9
+requests       pip3      6.418    4.122    2.296       35.8
+
+Aggregates (mean across all packages)
+------------------------------------------------------------------------
+  Mean native install time       : 1.114 s
+  Mean cold scan time            : 7.652 s
+  Mean warm scan time            : 5.353 s
+  Mean total overhead (cold, %)  : 914.5 %
+  Mean cache speedup             : 31.2 %
+
+========================================================================

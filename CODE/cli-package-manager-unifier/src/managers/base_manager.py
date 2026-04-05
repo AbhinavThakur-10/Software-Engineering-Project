@@ -13,8 +13,8 @@ class BasePackageManager(ABC):
 
     def __init__(self, name: str, command: str):
         """Initialize with display name and base command."""
-        self.name = name
-        self.command = command
+        self.name = name  # friendly name like "npm" or "pip3"
+        self.command = command  # actual CLI command to execute
 
     # ------------------------------------------------------------------
     # Abstract interface — every concrete manager MUST implement these.
@@ -69,6 +69,7 @@ class BasePackageManager(ABC):
                 name = pkg.get('name', '')
                 if not name:
                     continue
+                # trim description to 100 chars for cleaner output
                 packages.append({
                     'name': name,
                     'id': name,
@@ -84,6 +85,7 @@ class BasePackageManager(ABC):
     def _run_command(self, args: List[str], capture_output: bool = True) -> subprocess.CompletedProcess[str]:
         """Run the manager command with args."""
         try:
+            # Windows needs full path to avoid cmd.exe built-in conflicts
             if sys.platform == 'win32':
                 command_path = shutil.which(self.command)
                 if command_path is None:
@@ -97,7 +99,7 @@ class BasePackageManager(ABC):
                 capture_output=capture_output,
                 text=True,
                 encoding='utf-8',
-                errors='replace',
+                errors='replace',  # handle any encoding issues gracefully
                 timeout=30
             )
             return result
@@ -112,4 +114,5 @@ class BasePackageManager(ABC):
             result = self._run_command(['--version'])
             return result.returncode == 0
         except Exception:
+            # manager not installed or not in PATH
             return False

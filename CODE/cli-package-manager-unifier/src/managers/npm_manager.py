@@ -13,6 +13,7 @@ class NPMManager(BasePackageManager):
     def list_packages(self) -> List[Dict[str, str]]:
         """Return globally installed npm packages."""
         try:
+            # depth=0 prevents showing nested dependencies
             result: subprocess.CompletedProcess[str] = self._run_command(
                 ['list', '-g', '--depth=0', '--json']
             )
@@ -52,6 +53,7 @@ class NPMManager(BasePackageManager):
             args.append(package_name)
 
             print(f"Installing {package_name} via npm...")
+            # show output to user in real-time
             result: subprocess.CompletedProcess[str] = self._run_command(args, capture_output=False)
 
             if result.returncode == 0:
@@ -117,9 +119,11 @@ class NPMManager(BasePackageManager):
             return []
 
     def _parse_search_text(self, output: str, limit: int) -> List[Dict[str, str]]:
+        """Parse npm search text output when JSON fails."""
         packages: List[Dict[str, str]] = []
         lines = output.strip().split('\n')
 
+        # skip header line, process up to limit
         for line in lines[1:limit + 1]:
             parts = line.split()
             if len(parts) >= 2:
@@ -139,7 +143,7 @@ class NPMManager(BasePackageManager):
                 ['outdated', '-g', '--json']
             )
 
-            # npm outdated returns exit code 1 when there are outdated packages
+            # exit code 1 is normal when packages are outdated
             if result.returncode not in [0, 1]:
                 print("Warning: npm outdated returned unexpected exit code")
                 return []

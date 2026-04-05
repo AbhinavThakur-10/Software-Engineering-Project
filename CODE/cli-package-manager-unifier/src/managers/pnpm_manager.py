@@ -25,6 +25,7 @@ class PNPMManager(BasePackageManager):
             data = json.loads(result.stdout)
             packages: List[Dict[str, str]] = []
 
+            # pnpm wraps data in an array
             nodes = data[0].get('dependencies', {}) if isinstance(data, list) and data else {}
             if isinstance(nodes, dict):
                 for name, info in nodes.items():

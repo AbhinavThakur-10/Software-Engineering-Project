@@ -23,6 +23,7 @@ class YarnManager(BasePackageManager):
                 return []
 
             packages: List[Dict[str, str]] = []
+            # yarn outputs newline-delimited JSON objects
             for line in result.stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -32,6 +33,7 @@ class YarnManager(BasePackageManager):
                 except json.JSONDecodeError:
                     continue
 
+                # only process info-type entries
                 if item.get('type') != 'info':
                     continue
 
@@ -42,7 +44,7 @@ class YarnManager(BasePackageManager):
                 if not data.startswith('"'):
                     continue
 
-                # Example: "package@1.2.3"
+                # package format: "name@version"
                 entry = data.strip('"')
                 if '@' not in entry:
                     continue
@@ -112,7 +114,7 @@ class YarnManager(BasePackageManager):
                 ['global', 'outdated', '--json']
             )
 
-            # yarn can return non-zero if outdated packages are present
+            # yarn returns 1 when outdated packages exist
             if result.returncode not in [0, 1]:
                 return []
 
@@ -126,12 +128,14 @@ class YarnManager(BasePackageManager):
                 except json.JSONDecodeError:
                     continue
 
+                # look for table-type output
                 if item.get('type') != 'table':
                     continue
 
                 data = item.get('data', {})
                 body = data.get('body', []) if isinstance(data, dict) else []
                 for row in body:
+                    # each row: [name, current, wanted, latest]
                     if not isinstance(row, list) or len(row) < 4:
                         continue
                     name = row[0]
