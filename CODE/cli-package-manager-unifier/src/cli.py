@@ -3,6 +3,7 @@ import argparse
 import sys
 import threading
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Dict, List, Any, Optional, cast
 
@@ -166,6 +167,15 @@ class UnifiedCLI:
             target = self._resolve_target_version_for_upgrade(package_name, manager_name)
             if target:
                 return target
+            # check_outdated missed it (e.g. locally installed pkg) — ask registry directly
+            manager = self.available_managers.get(manager_name)
+            if manager:
+                try:
+                    latest = manager.get_latest_registry_version(package_name)
+                    if latest:
+                        return latest
+                except Exception:
+                    pass
 
         installed = self._get_installed_version(package_name, manager_name)
         if installed:
@@ -191,6 +201,74 @@ class UnifiedCLI:
             return None
 
         return None
+
+    # ------------------------------------------------------------------
+    # Free-provider quick scan (OSV + GitHub Advisory, no API keys)
+    # ------------------------------------------------------------------
+
+    def _scan_free_providers(
+        self, package_name: str, manager_name: str, version: Optional[str]
+    ) -> Dict[str, Any]:
+        """Run OSV and GitHub Advisory in parallel; return aggregated finding summary.
+
+        Used for the `list` vulnerability column and post-upgrade patched-CVE note.
+        Does NOT call VirusTotal or OSS Index so no API key is required.
+
+        Returns a dict:
+            {
+                "total": int,
+                "critical": int, "high": int, "medium": int, "low": int,
+                "findings": [{"id", "severity", "summary", "source"}, ...],
+                "label": str,   # "CRITICAL" / "HIGH" / "WARN" / "CLEAN" / "ERROR"
+            }
+        """
+        from src.utils.security_providers import scan_with_osv, scan_with_github_advisory
+
+        def _osv() -> Dict[str, Any]:
+            return scan_with_osv(package_name, manager_name, version)
+
+        def _github() -> Dict[str, Any]:
+            return scan_with_github_advisory(package_name, manager_name, version)
+
+        findings: List[Dict[str, Any]] = []
+        error_count = 0
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {pool.submit(_osv): "osv", pool.submit(_github): "github_advisory"}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result.get("status") == "ok":
+                        raw = result.get("findings", [])
+                        if isinstance(raw, list):
+                            for item in cast(List[Any], raw):
+                                if isinstance(item, dict):
+                                    findings.append(cast(Dict[str, Any], item))
+                    else:
+                        error_count += 1
+                except Exception:
+                    error_count += 1
+
+        counts: Dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for f in findings:
+            sev = str(f.get("severity", "")).lower()
+            if sev in counts:
+                counts[sev] += 1
+
+        total = sum(counts.values())
+
+        if total == 0 and error_count == 2:
+            label = "ERROR"
+        elif counts["critical"] > 0:
+            label = "CRITICAL"
+        elif counts["high"] > 0:
+            label = "HIGH"
+        elif counts["medium"] > 0 or counts["low"] > 0:
+            label = "WARN"
+        else:
+            label = "CLEAN"
+
+        return {**counts, "total": total, "findings": findings, "label": label}
 
     # ------------------------------------------------------------------
     # Security helpers
@@ -509,10 +587,14 @@ class UnifiedCLI:
         show_findings: int = 0,
         force_security: bool = False,
     ) -> None:
-        """Run security scan, execute *operation*, emit report.
+        """Run security scan, write report, prompt user, then execute *operation*.
 
-        This single helper replaces the previously duplicated logic in
-        install_package, upgrade_package, and update_package.
+        Flow:
+          1. Security scan (download artifact hash + query all providers)
+          2. Write pre-action report to disk so user can review it
+          3. Prompt user to confirm — always for install/upgrade, regardless of decision
+          4. Execute manager operation only if user confirms
+          5. Update report with final install outcome
         """
         # 1. Security gate
         if not skip_security:
@@ -520,8 +602,16 @@ class UnifiedCLI:
             try:
                 may_proceed = self._security_scan(package_name, manager_name, action)
 
-                # Optional pre-action markdown export prompt (must come before proceed confirmation)
+                # --- FIX 3: Write report BEFORE prompting user so they can open it ---
                 if action in ("install", "upgrade"):
+                    self._emit_security_report(
+                        action=action,
+                        package_name=package_name,
+                        manager_name=manager_name,
+                        operation_status="pre-action",
+                        operation_success=False,
+                        scan_result=self._last_security_scan,
+                    )
                     self._offer_markdown_report_before_action(action, package_name, manager_name)
 
                 if not may_proceed:
@@ -533,49 +623,41 @@ class UnifiedCLI:
                         )
                         may_proceed = True
                     else:
-                        self._emit_security_report(
-                            action=action,
-                            package_name=package_name,
-                            manager_name=manager_name,
-                            operation_status="blocked",
-                            operation_success=False,
-                            scan_result=self._last_security_scan,
-                        )
                         return
 
                 decision = str((self._last_security_scan or {}).get("decision", "allow")).lower()
-                if decision == "warn":
-                    if force_security:
+
+                if force_security:
+                    if decision == "warn":
                         print(
                             f"{Fore.YELLOW}[Security]{Style.RESET_ALL} "
                             "--force: skipping confirmation for security WARN."
                         )
-                    else:
-                        try:
-                            choice = (
-                                input(
-                                    f"{Fore.YELLOW}Security warning detected. Proceed anyway? (y/n): "
-                                    f"{Style.RESET_ALL}"
-                                )
-                                .strip()
-                                .lower()
+                    # --force on a clean result: still proceed without prompting
+                else:
+                    # --- FIX 2: Always prompt before install/upgrade ---
+                    if action in ("install", "upgrade"):
+                        if decision == "warn":
+                            prompt_msg = (
+                                f"{Fore.YELLOW}[Security] Vulnerabilities found. "
+                                f"Proceed with {action}? (y/n): {Style.RESET_ALL}"
                             )
+                        else:
+                            prompt_msg = (
+                                f"{Fore.GREEN}[Security] Scan passed. "
+                                f"Proceed with {action}? (y/n): {Style.RESET_ALL}"
+                            )
+                        try:
+                            choice = input(prompt_msg).strip().lower()
                         except (EOFError, OSError):
                             choice = "n"
 
                         if choice != "y":
-                            print(f"{Fore.RED}[Security]{Style.RESET_ALL} Action cancelled by user.")
-                            self._emit_security_report(
-                                action=action,
-                                package_name=package_name,
-                                manager_name=manager_name,
-                                operation_status="blocked",
-                                operation_success=False,
-                                scan_result=self._last_security_scan,
-                            )
+                            print(f"{Fore.CYAN}[Security]{Style.RESET_ALL} {action.capitalize()} cancelled by user.")
                             return
 
-                        print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Proceeding despite warning.")
+                        if decision == "warn":
+                            print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Proceeding despite warning.")
             finally:
                 self._findings_display_limit = 0
 
@@ -593,7 +675,7 @@ class UnifiedCLI:
         else:
             print(f"{Fore.RED}{_SYMBOL_FAIL} Failed to {action} {package_name}{Style.RESET_ALL}")
 
-        # 3. Emit report
+        # 3. Update report with final outcome (overwrites pre-action report)
         self._emit_security_report(
             action=action,
             package_name=package_name,

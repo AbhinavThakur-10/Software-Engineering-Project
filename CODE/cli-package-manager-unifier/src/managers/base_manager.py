@@ -108,6 +108,22 @@ class BasePackageManager(ABC):
         except FileNotFoundError:
             raise FileNotFoundError(f"{self.command} is not installed or not in PATH")
 
+    def get_latest_registry_version(self, package_name: str) -> Optional[str]:
+        """Return the latest published version from the registry, or None on failure.
+
+        Default implementation queries the npm registry — works for npm, yarn, pnpm.
+        pip overrides this to hit PyPI instead.
+        """
+        try:
+            url = f"https://registry.npmjs.org/{package_name}/latest"
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                version = str(response.json().get("version", "")).strip()
+                return version or None
+        except Exception:
+            pass
+        return None
+
     def is_available(self) -> bool:
         """Return True if the manager responds to --version."""
         try:
