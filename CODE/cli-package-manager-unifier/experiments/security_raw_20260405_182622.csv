@@ -1,0 +1,13 @@
+package,manager,version,test_type,ground_truth_vulnerable,decision,predicted_positive,coverage,from_cache,osv_status,github_status,oss_index_status,virustotal_status,critical,high,medium,low,runtime_s,report_file
+react,npm,18.2.0,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,8.199,upgrade_react_20260405_182631.json
+lodash,npm,4.17.21,cve,1,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,8.838,upgrade_lodash_20260405_182640.json
+express,npm,4.18.2,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,9.191,upgrade_express_20260405_182649.json
+requests,pip3,2.31.0,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,6.176,upgrade_requests_20260405_182655.json
+flask,pip3,3.0.0,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,7.482,upgrade_flask_20260405_182703.json
+werkzeug,pip3,2.2.2,cve,1,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,6.274,upgrade_werkzeug_20260405_182709.json
+minimist,npm,1.2.5,cve,1,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,9.754,upgrade_minimist_20260405_182719.json
+node-ipc,npm,10.1.1,supply_chain,1,error,0,0,false,error,error,error,error,0,0,0,0,9.377,NOT_FOUND
+ua-parser-js,npm,0.7.29,supply_chain,1,error,0,0,false,error,error,error,error,0,0,0,0,10.318,NOT_FOUND
+Pillow,pip3,8.3.1,cve,1,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,10.858,upgrade_Pillow_20260405_182749.json
+click,pip3,8.1.7,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,6.544,upgrade_click_20260405_182756.json
+numpy,pip3,1.24.0,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,15.078,upgrade_numpy_20260405_182811.json

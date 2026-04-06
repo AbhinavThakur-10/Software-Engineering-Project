@@ -1,0 +1,13 @@
+package,manager,version,test_type,ground_truth_vulnerable,decision,predicted_positive,coverage,from_cache,osv_status,github_status,oss_index_status,virustotal_status,critical,high,medium,low,runtime_s,report_file
+react,npm,18.2.0,clean,0,allow,0,3,false,ok,ok,ok,unavailable,0,0,0,0,8.878,install_react@18.2.0_20260405_183935.json
+lodash,npm,4.17.21,cve,1,warn,1,3,false,ok,ok,ok,unavailable,0,3,3,1,4.015,install_lodash@4.17.21_20260405_183940.json
+express,npm,4.18.2,clean,0,warn,1,3,false,ok,ok,ok,unavailable,0,0,4,2,3.463,install_express@4.18.2_20260405_183943.json
+requests,pip3,2.31.0,clean,0,warn,1,4,false,ok,ok,ok,ok,0,0,6,0,4.552,install_requests_2.31.0_20260405_183948.json
+flask,pip3,3.0.0,clean,0,warn,1,4,false,ok,ok,ok,ok,0,0,1,1,4.739,install_flask_3.0.0_20260405_183952.json
+werkzeug,pip3,2.2.2,cve,1,warn,1,4,false,ok,ok,ok,ok,0,4,8,1,5.5,install_werkzeug_2.2.2_20260405_183958.json
+minimist,npm,1.2.5,cve,1,block,1,3,false,ok,ok,ok,unavailable,2,0,0,0,3.533,install_minimist@1.2.5_20260405_184001.json
+node-ipc,npm,10.1.1,supply_chain,1,block,1,3,false,ok,ok,ok,unavailable,1,0,0,0,3.237,install_node-ipc@10.1.1_20260405_184005.json
+ua-parser-js,npm,0.7.29,supply_chain,1,warn,1,3,false,ok,ok,ok,unavailable,0,3,0,0,3.973,install_ua-parser-js@0.7.29_20260405_184009.json
+Pillow,pip3,8.3.1,cve,1,block,1,4,false,ok,ok,ok,ok,5,6,5,1,9.959,install_Pillow_8.3.1_20260405_184019.json
+click,pip3,8.1.7,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,5.353,install_click_8.1.7_20260405_184024.json
+numpy,pip3,1.24.0,clean,0,allow,0,3,false,ok,ok,ok,unavailable,0,0,0,0,20.856,install_numpy_1.24.0_20260405_184045.json

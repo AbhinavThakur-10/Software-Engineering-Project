@@ -24,7 +24,7 @@ python unified.py <command>
 pytest tests/ -v                          # all tests
 pytest tests/test_managers.py -v         # manager unit tests only
 pytest tests/test_cli_handlers.py -v     # CLI handler tests only
-pytest tests/test_phase1_cli.py -v       # CLI integration tests
+pytest tests/test_cli_integration.py -v  # CLI integration tests
 pytest tests/ -v -k "test_install"       # run tests matching a pattern
 ```
 
@@ -78,4 +78,4 @@ Copy `.env.example` to `.env` — loaded automatically via `python-dotenv`.
 ### Test conventions
 - `tests/conftest.py` provides fixtures that monkeypatch `BasePackageManager.is_available` to avoid real subprocess calls; use `cli_no_managers` for CLI-level tests.
 - Security provider tests mock HTTP calls; do not make real network requests in tests.
-- Test files are grouped by phase: `test_phase1_*` (managers/CLI), `test_phase2_*` (security layer), `test_security_report_and_cache.py` (persistence).
+- Test files are named by feature: `test_managers`, `test_cli_handlers`, `test_cli_integration`, `test_virustotal`, `test_security_aggregator`, `test_security_cache`, `test_security_providers`, `test_security_report_and_cache`.

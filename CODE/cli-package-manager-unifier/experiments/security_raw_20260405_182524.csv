@@ -1,0 +1,4 @@
+package,manager,version,test_type,ground_truth_vulnerable,decision,predicted_positive,coverage,from_cache,osv_status,github_status,oss_index_status,virustotal_status,critical,high,medium,low,runtime_s,report_file
+react,npm,18.2.0,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,12.775,upgrade_react_20260405_182537.json
+lodash,npm,4.17.21,cve,1,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,9.887,upgrade_lodash_20260405_182547.json
+express,npm,4.18.2,clean,0,allow,0,4,false,ok,ok,ok,ok,0,0,0,0,9.377,upgrade_express_20260405_182557.json

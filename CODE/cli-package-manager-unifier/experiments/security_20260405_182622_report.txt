@@ -1,0 +1,71 @@
+========================================================================
+  Track 2: Security Detection — Results Report
+  Generated : 2026-04-05 18:28:41
+  Source    : security_raw_20260405_182622.csv
+========================================================================
+
+Table 1 — Per-Package Decisions
+------------------------------------------------------------------------
+Package          Mgr    Type            GT Decision  Pred  TP  FP  TN  FN
+------------------------------------------------------------------------
+react            npm    clean            0 allow        0   0   0   1   0
+lodash           npm    cve              1 allow        0   0   0   0   1
+express          npm    clean            0 allow        0   0   0   1   0
+requests         pip3   clean            0 allow        0   0   0   1   0
+flask            pip3   clean            0 allow        0   0   0   1   0
+werkzeug         pip3   cve              1 allow        0   0   0   0   1
+minimist         npm    cve              1 allow        0   0   0   0   1
+node-ipc         npm    supply_chain     1 error        0   0   0   0   1
+ua-parser-js     npm    supply_chain     1 error        0   0   0   0   1
+Pillow           pip3   cve              1 allow        0   0   0   0   1
+click            pip3   clean            0 allow        0   0   0   1   0
+numpy            pip3   clean            0 allow        0   0   0   1   0
+
+Table 2 — Confusion Matrix & Core Metrics
+------------------------------------------------------------------------
+  Total packages tested : 12
+  True Positives  (TP)  : 0   (vulnerable, correctly flagged)
+  False Positives (FP)  : 0   (clean, incorrectly flagged)
+  True Negatives  (TN)  : 6   (clean, correctly passed)
+  False Negatives (FN)  : 6   (vulnerable, missed)
+
+  Precision  : n/a   (of flagged, how many were truly vulnerable)
+  Recall     : 0.0%   (of vulnerable, how many were caught)
+  F1 Score   : n/a
+  Accuracy   : 50.0%
+
+Table 3 — Supply-Chain Attack Detection
+------------------------------------------------------------------------
+  Packages tested  : 2  (node-ipc, ua-parser-js)
+  Detected (WARN/BLOCK) : 0
+  Detection rate   : 0.0%
+
+    [MISSED]    node-ipc  =>  ERROR
+    [MISSED]    ua-parser-js  =>  ERROR
+
+Table 4 — Provider Coverage (status=ok across all scans)
+------------------------------------------------------------------------
+  Provider          OK runs   Total      Rate
+  --------------------------------------------
+  osv                    10      12     83.3%
+  github                 10      12     83.3%
+  oss_index              10      12     83.3%
+  virustotal             10      12     83.3%
+
+Table 5 — Provider Contribution to True Positives
+------------------------------------------------------------------------
+  Provider          Contributed   TP total      Rate
+  --------------------------------------------------
+  osv                         0          0       n/a
+  github                      0          0       n/a
+  oss_index                   0          0       n/a
+  virustotal                  0          0       n/a
+
+Target Thresholds
+------------------------------------------------------------------------
+  Precision  > 75%  : FAIL / n/a
+  Recall     > 80%  : FAIL / n/a
+  F1         > 75%  : FAIL / n/a
+  SC detect  > 80%  : FAIL / n/a
+
+========================================================================

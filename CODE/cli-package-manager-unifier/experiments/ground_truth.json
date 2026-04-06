@@ -2,13 +2,14 @@
   "metadata": {
     "description": "Ground truth vulnerability labels for experiment packages",
     "created": "2025-04-04",
+    "updated": "2026-04-05",
     "labeling_sources": [
       "NVD (nvd.nist.gov)",
       "Snyk Vulnerability Database",
       "GitHub Security Advisories",
       "Package Changelogs"
     ],
-    "notes": "Labels based on package versions commonly installed as of April 2025"
+    "notes": "Labels based on package versions commonly installed as of April 2025. test_type: 'cve' = known CVE, 'supply_chain' = malicious code injected by maintainer/attacker, 'clean' = expected safe."
   },
   "packages": [
     {
@@ -16,6 +17,7 @@
       "manager": "npm",
       "version": "18.2.0",
       "ground_truth_vulnerable": 0,
+      "test_type": "clean",
       "notes": "No known CVEs in recent versions"
     },
     {
@@ -23,6 +25,7 @@
       "manager": "npm",
       "version": "4.17.21",
       "ground_truth_vulnerable": 1,
+      "test_type": "cve",
       "known_cves": [
         "CVE-2020-8203 (Prototype Pollution)",
         "CVE-2020-28500 (ReDoS)",
@@ -35,6 +38,7 @@
       "manager": "npm",
       "version": "4.18.2",
       "ground_truth_vulnerable": 0,
+      "test_type": "clean",
       "notes": "No known CVEs in recent versions"
     },
     {
@@ -42,6 +46,7 @@
       "manager": "pip3",
       "version": "2.31.0",
       "ground_truth_vulnerable": 0,
+      "test_type": "clean",
       "notes": "No known CVEs in recent versions"
     },
     {
@@ -49,6 +54,7 @@
       "manager": "pip3",
       "version": "3.0.0",
       "ground_truth_vulnerable": 0,
+      "test_type": "clean",
       "notes": "No known CVEs in recent versions"
     },
     {
@@ -56,18 +62,87 @@
       "manager": "pip3",
       "version": "2.2.2",
       "ground_truth_vulnerable": 1,
+      "test_type": "cve",
       "known_cves": [
         "CVE-2023-25577 (Debugger PIN Weakness)",
         "CVE-2023-23934 (Cookie Parsing)"
       ],
       "notes": "Multiple CVEs in versions < 2.2.3"
+    },
+    {
+      "name": "minimist",
+      "manager": "npm",
+      "version": "1.2.5",
+      "ground_truth_vulnerable": 1,
+      "test_type": "cve",
+      "known_cves": [
+        "CVE-2021-44906 (Prototype Pollution)"
+      ],
+      "known_advisories": [
+        "GHSA-xvch-5gv4-984h"
+      ],
+      "notes": "Prototype pollution in versions < 1.2.6; widely used transitive dependency"
+    },
+    {
+      "name": "node-ipc",
+      "manager": "npm",
+      "version": "10.1.1",
+      "ground_truth_vulnerable": 1,
+      "test_type": "supply_chain",
+      "known_advisories": [
+        "GHSA-97m3-w2cp-4xx6"
+      ],
+      "notes": "Maintainer intentionally injected destructive payload (peacenotwar module) that deleted files on Russian/Belarusian IP addresses. Published March 2022."
+    },
+    {
+      "name": "ua-parser-js",
+      "manager": "npm",
+      "version": "0.7.29",
+      "ground_truth_vulnerable": 1,
+      "test_type": "supply_chain",
+      "known_cves": [
+        "CVE-2021-41265"
+      ],
+      "known_advisories": [
+        "GHSA-pjwm-rvh2-c87w"
+      ],
+      "notes": "npm account hijacked; attacker published 0.7.29/0.8.0/1.0.0 with cryptominer and credential stealer. Oct 2021."
+    },
+    {
+      "name": "Pillow",
+      "manager": "pip3",
+      "version": "8.3.1",
+      "ground_truth_vulnerable": 1,
+      "test_type": "cve",
+      "known_cves": [
+        "CVE-2021-34552 (Buffer overflow in Pillow < 8.3.2)",
+        "CVE-2021-23437 (ReDoS)"
+      ],
+      "notes": "Multiple high-severity CVEs in versions < 8.3.2"
+    },
+    {
+      "name": "click",
+      "manager": "pip3",
+      "version": "8.1.7",
+      "ground_truth_vulnerable": 0,
+      "test_type": "clean",
+      "notes": "No known CVEs; used as clean pip3 baseline in timing track"
+    },
+    {
+      "name": "numpy",
+      "manager": "pip3",
+      "version": "1.24.0",
+      "ground_truth_vulnerable": 0,
+      "test_type": "clean",
+      "notes": "No critical CVEs in recent versions; additional clean baseline"
     }
   ],
   "labeling_criteria": {
     "vulnerable_conditions": [
       "Package version has known CVE in NVD",
       "Package version listed in GitHub Security Advisory",
-      "Package version has Snyk vulnerability entry"
+      "Package version has Snyk vulnerability entry",
+      "Package version contains intentionally injected malicious code (supply chain attack)"
     ],
     "safe_conditions": [
       "No CVEs found in NVD for version",

@@ -287,7 +287,12 @@ def scan_with_oss_index(package_name: str, manager: str, version: Optional[str] 
         }
 
     payload = response.get("payload", {})
-    vulnerabilities = payload.get("vulnerabilities", []) if isinstance(payload, dict) else []
+    # OSS Index returns a list of component-report objects; collect vulns from all entries
+    components = payload if isinstance(payload, list) else [payload] if isinstance(payload, dict) else []
+    vulnerabilities: List[Dict[str, Any]] = []
+    for component in components:
+        if isinstance(component, dict):
+            vulnerabilities.extend(component.get("vulnerabilities", []))
     findings: List[Dict[str, Any]] = []
 
     for vuln in vulnerabilities:

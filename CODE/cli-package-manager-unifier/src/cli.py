@@ -150,7 +150,18 @@ class UnifiedCLI:
 
         *upgrade*: prefer the target (latest) version you are moving to, not only the installed one.
         *install*: installed copy if present, else registry candidate from search.
+
+        If package_name embeds a version (e.g. ``lodash@4.17.21`` or ``werkzeug==2.2.2``),
+        that pinned version is returned immediately regardless of action.
         """
+        # Extract pinned version from package name.
+        # Handles: lodash@4.17.21, werkzeug==2.2.2, minimist@^1.2.5
+        # Does NOT match scoped npm packages like @babel/core (leading @, no prior chars).
+        import re as _re
+        m = _re.search(r'(?<=.)[@=]=?(\d[^\s]*)$', package_name)
+        if m:
+            return m.group(1)
+
         if action == "upgrade":
             target = self._resolve_target_version_for_upgrade(package_name, manager_name)
             if target:
@@ -226,8 +237,14 @@ class UnifiedCLI:
                 package_name, manager_name, action=action
             )
 
+            # Strip embedded version specifier so providers receive a plain name.
+            # e.g. "werkzeug==2.2.2" -> "werkzeug", "minimist@1.2.5" -> "minimist"
+            # Preserves scoped packages like "@babel/core" (leading @ with no prior chars).
+            import re as _re
+            base_name = _re.sub(r'(?<=.)[@=]=?\d[^\s]*$', '', package_name).strip()
+
             result = self.security_aggregator.analyze(
-                package_name=package_name,
+                package_name=base_name,
                 manager=manager_name,
                 version=installed_version,
                 file_hash=file_hash,

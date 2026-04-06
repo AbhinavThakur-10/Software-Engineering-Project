@@ -339,3 +339,88 @@ timing differences reflect the scanner, not download time.
 | Total warm overhead | < 3 s |
 | Cache speedup | > 85 % |
 | Manager dispatch overhead | < 5 % of native |
+
+---
+
+## Track 2: Security Detection
+
+**Objective:** Verify the scanner correctly flags vulnerable/malicious packages
+(WARN or BLOCK) and passes clean ones (ALLOW). Includes real supply-chain attack
+packages to test the hardest class of threat.
+
+### Protocol
+
+Run from `cli-package-manager-unifier/` with all provider credentials set:
+
+```powershell
+pwsh -File experiments/run_security_detection.ps1
+```
+
+Then analyse:
+
+```powershell
+# Auto-detects latest security_raw_*.csv
+python experiments/analyze_security.py
+
+# Or point to a specific file
+python experiments/analyze_security.py experiments/security_raw_20260405_130000.csv
+```
+
+**Important:** The script uses `unified upgrade <pkg> --show-findings 5` and inputs
+`n` to decline the actual upgrade. Nothing is installed. The full security pipeline
+(all 4 providers) runs and the JSON report is read back for metrics.
+
+### Package Test Set
+
+#### True Positives — expected WARN or BLOCK
+
+| Package | Manager | Version | Type | Known issue |
+|---|---|---|---|---|
+| `lodash` | npm | 4.17.21 | cve | Prototype Pollution, ReDoS (CVE-2020-8203, CVE-2020-28500) |
+| `minimist` | npm | 1.2.5 | cve | Prototype Pollution (CVE-2021-44906) |
+| `node-ipc` | npm | 10.1.1 | supply_chain | Maintainer-injected destructive payload (peacenotwar, GHSA-97m3-w2cp-4xx6) |
+| `ua-parser-js` | npm | 0.7.29 | supply_chain | Account hijack → cryptominer + credential stealer injected (CVE-2021-41265) |
+| `werkzeug` | pip3 | 2.2.2 | cve | Debugger PIN bypass, Cookie parsing (CVE-2023-25577, CVE-2023-23934) |
+| `Pillow` | pip3 | 8.3.1 | cve | Buffer overflow, ReDoS (CVE-2021-34552, CVE-2021-23437) |
+
+#### True Negatives — expected ALLOW
+
+| Package | Manager | Version | Notes |
+|---|---|---|---|
+| `react` | npm | 18.2.0 | No known CVEs |
+| `express` | npm | 4.18.2 | No known CVEs |
+| `requests` | pip3 | 2.31.0 | No known CVEs |
+| `flask` | pip3 | 3.0.0 | No known CVEs |
+| `click` | pip3 | 8.1.7 | No known CVEs |
+| `numpy` | pip3 | 1.24.0 | No known CVEs |
+
+### Output Files
+
+| File | Contents |
+|---|---|
+| `security_raw_<ts>.csv` | One row per package with decision + provider statuses |
+| `security_<ts>_summary.csv` | Same rows with tp/fp/tn/fn columns added |
+| `security_<ts>_report.txt` | Full report: confusion matrix, metrics, supply-chain table, provider tables |
+
+### Metrics Computed
+
+| Metric | Definition |
+|---|---|
+| `predicted_positive` | 1 if decision is `warn` or `block`, 0 if `allow` |
+| TP / FP / TN / FN | Standard confusion matrix cells |
+| Precision | TP / (TP + FP) |
+| Recall | TP / (TP + FN) |
+| F1 | 2 × Precision × Recall / (Precision + Recall) |
+| `malware_detection_rate` | TP(supply_chain only) / total supply_chain packages |
+| Provider coverage | % of scans where each provider returned `status=ok` |
+| Provider contribution | % of TP detections where each provider was `ok` |
+
+### Target Thresholds
+
+| Metric | Target |
+|---|---|
+| Precision | > 75% |
+| Recall | > 80% |
+| F1 | > 75% |
+| Supply-chain detection rate | > 80% |
+| Provider coverage (mean) | > 75% |

@@ -180,9 +180,11 @@ cli-package-manager-unifier/
 │   ├── conftest.py                  # Shared fixtures
 │   ├── test_managers.py             # Manager unit tests (31)
 │   ├── test_cli_handlers.py         # CLI handler tests (14)
-│   ├── test_phase1_cli.py           # CLI integration tests (7)
-│   ├── test_phase1_virustotal.py    # VirusTotal tests (3)
-│   ├── test_phase2_security_*.py    # Security provider/cache tests (9)
+│   ├── test_cli_integration.py      # CLI integration tests (7)
+│   ├── test_virustotal.py           # VirusTotal tests (3)
+│   ├── test_security_aggregator.py  # Aggregator tests
+│   ├── test_security_cache.py       # Cache tests
+│   ├── test_security_providers.py   # Provider tests
 │   └── test_security_report_and_cache.py  # Report & DB tests (6)
 ├── unified.py                       # Entry-point script
 ├── setup.py                         # Package configuration

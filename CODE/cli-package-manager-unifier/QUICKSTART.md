@@ -115,6 +115,6 @@ This means insufficient provider coverage. Ensure at least 2 providers are confi
 
 ## Next Steps
 
-- Read [SECURITY_MODEL.md](SECURITY_MODEL.md) to understand how decisions are made
+- Read [SECURITY_MODEL.md](docs/SECURITY_MODEL.md) to understand how decisions are made
 - Check [docs/PROVIDERS.md](docs/PROVIDERS.md) for provider details
 - Run experiments with [experiments/EXPERIMENTS.md](experiments/EXPERIMENTS.md)
