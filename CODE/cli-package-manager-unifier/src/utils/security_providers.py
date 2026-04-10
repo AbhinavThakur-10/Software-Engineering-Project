@@ -163,18 +163,60 @@ def scan_with_osv(package_name: str, manager: str, version: Optional[str] = None
         summary = vuln.get("summary") or vuln.get("details") or "OSV vulnerability"
         severity = "unknown"
 
-        # parse CVSS score from severity field
+        # Parse CVSS score from the OSV severity field.
+        #
+        # OSV returns one of two formats:
+        #   • A CVSS vector string: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+        #     — the last "/" segment is a metric abbreviation, NOT a float.
+        #     The old `float(score.split("/")[-1])` always raises ValueError here.
+        #   • A plain numeric string or float: "7.5"
+        #
+        # Resolution order:
+        #   1. If score is already a float/int → direct mapping.
+        #   2. If score is a plain numeric string → parse it.
+        #   3. CVSS vector → fall back to database_specific.severity (text label)
+        #      or database_specific.cvss_score (numeric).
+        #   4. Final fallback: ecosystem_specific.severity inside affected[].
         sev_items = vuln.get("severity", [])
         if isinstance(sev_items, list) and sev_items:
             first = sev_items[0]
             if isinstance(first, dict):
                 score = first.get("score")
-                if isinstance(score, str) and score.startswith("CVSS"):
+                if isinstance(score, (int, float)):
+                    # Direct numeric score
+                    severity = _severity_from_cvss(float(score))
+                elif isinstance(score, str):
+                    # Try plain numeric string first (e.g. "7.5")
                     try:
-                        cvss = float(score.split("/")[-1])
-                        severity = _severity_from_cvss(cvss)
-                    except Exception:
-                        severity = "unknown"
+                        severity = _severity_from_cvss(float(score))
+                    except ValueError:
+                        # score is a CVSS vector string — mine database_specific instead
+                        db_spec = vuln.get("database_specific", {})
+                        if isinstance(db_spec, dict):
+                            num = db_spec.get("cvss_score") or db_spec.get("severity_score")
+                            if isinstance(num, (int, float)):
+                                severity = _severity_from_cvss(float(num))
+                            elif isinstance(num, str):
+                                try:
+                                    severity = _severity_from_cvss(float(num))
+                                except ValueError:
+                                    pass
+                            # Text label from database_specific (e.g. "HIGH")
+                            if severity == "unknown":
+                                sev_label = str(db_spec.get("severity", "")).lower()
+                                if sev_label in {"critical", "high", "medium", "low"}:
+                                    severity = sev_label
+
+        # Fallback: ecosystem_specific.severity inside each affected entry
+        if severity == "unknown":
+            for affected in vuln.get("affected", []):
+                if isinstance(affected, dict):
+                    eco_spec = affected.get("ecosystem_specific", {})
+                    if isinstance(eco_spec, dict):
+                        eco_sev = str(eco_spec.get("severity", "")).lower()
+                        if eco_sev in {"critical", "high", "medium", "low"}:
+                            severity = eco_sev
+                            break
 
         findings.append({
             "id": vuln_id,

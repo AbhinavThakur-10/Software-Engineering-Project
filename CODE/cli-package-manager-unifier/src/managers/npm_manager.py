@@ -68,9 +68,18 @@ class NPMManager(BasePackageManager):
             return False
     
     def upgrade_package(self, package_name: str, global_upgrade: bool = True) -> bool:
-        """Upgrade an npm package to latest."""
+        """Upgrade an npm package to latest (or a specific version if specifier present)."""
         try:
-            args = ['update']
+            # `npm update` rejects version specifiers like `pkg@1.2.3`.
+            # When the caller passes a pinned specifier, use `npm install` instead.
+            # Scoped packages start with `@` (e.g. `@scope/pkg`); a version specifier
+            # adds a second `@` (e.g. `@scope/pkg@1.2.3`).
+            has_version_specifier = (
+                (not package_name.startswith('@') and '@' in package_name)
+                or (package_name.startswith('@') and package_name.count('@') >= 2)
+            )
+            cmd = 'install' if has_version_specifier else 'update'
+            args = [cmd]
             if global_upgrade:
                 args.append('-g')
             args.append(package_name)

@@ -1,5 +1,6 @@
 """Supply-Chain Security Scanner - Multi-provider vulnerability aggregation."""
 import argparse
+import re
 import sys
 import threading
 import os
@@ -58,6 +59,8 @@ class UnifiedCLI:
         )
         self._last_security_scan: Optional[Dict[str, Any]] = None
         self._findings_display_limit: int = 0
+        # TOCTOU fix: stores the exact version resolved before artifact download
+        self._last_resolved_version: Optional[str] = None
 
         self.managers: Dict[str, BasePackageManager] = {
             "npm": NPMManager(),
@@ -158,8 +161,7 @@ class UnifiedCLI:
         # Extract pinned version from package name.
         # Handles: lodash@4.17.21, werkzeug==2.2.2, minimist@^1.2.5
         # Does NOT match scoped npm packages like @babel/core (leading @, no prior chars).
-        import re as _re
-        m = _re.search(r'(?<=.)[@=]=?(\d[^\s]*)$', package_name)
+        m = re.search(r'(?<=.)[@=]=?(\d[^\s]*)$', package_name)
         if m:
             return m.group(1)
 
@@ -284,6 +286,14 @@ class UnifiedCLI:
                 f"for {package_name} ({manager_name}) [{action}]..."
             )
 
+            # TOCTOU fix: resolve the exact version BEFORE downloading the artifact.
+            # This guarantees that the hash we compute corresponds to the same
+            # release that the package manager will install.
+            installed_version = self._resolve_scan_version(
+                package_name, manager_name, action=action
+            )
+            self._last_resolved_version = installed_version
+
             stop_event = threading.Event()
             spinner_msg = (
                 f"{Fore.CYAN}[Security]{Style.RESET_ALL} "
@@ -292,7 +302,7 @@ class UnifiedCLI:
 
             def _spin() -> None:
                 """Display a spinner while security scan is in progress.
-                
+
                 Runs in a separate thread and checks stop_event periodically.
                 Cycles through spinner symbols to show activity.
                 """
@@ -307,19 +317,17 @@ class UnifiedCLI:
             t = threading.Thread(target=_spin, daemon=True)
             t.start()
 
-            file_hash = download_package_and_get_hash(package_name, manager_name)
+            # Pass the pinned version so the download targets the exact release.
+            file_hash = download_package_and_get_hash(
+                package_name, manager_name, version=installed_version
+            )
             stop_event.set()
             t.join()
-
-            installed_version = self._resolve_scan_version(
-                package_name, manager_name, action=action
-            )
 
             # Strip embedded version specifier so providers receive a plain name.
             # e.g. "werkzeug==2.2.2" -> "werkzeug", "minimist@1.2.5" -> "minimist"
             # Preserves scoped packages like "@babel/core" (leading @ with no prior chars).
-            import re as _re
-            base_name = _re.sub(r'(?<=.)[@=]=?\d[^\s]*$', '', package_name).strip()
+            base_name = re.sub(r'(?<=.)[@=]=?\d[^\s]*$', '', package_name).strip()
 
             result = self.security_aggregator.analyze(
                 package_name=base_name,
@@ -491,19 +499,24 @@ class UnifiedCLI:
             return True
 
         except Exception as ex:
+            # Fail-closed: an unexpected scan error must NOT be treated as a green
+            # light.  Returning True here (fail-open) allowed a broken scanner to
+            # silently approve every install — exactly the supply-chain attack
+            # surface we are protecting against.  We return False so the operation
+            # is blocked unless the caller explicitly passes --no-security.
             print(
-                f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Security scan skipped "
-                f"due to error: {ex}"
+                f"{Fore.RED}[Security]{Style.RESET_ALL} Security scan FAILED "
+                f"({ex}). Blocking action (use --no-security to override)."
             )
             self._last_security_scan = {
-                "decision": "warn",
-                "reason": str(ex),
+                "decision": "block",
+                "reason": f"scan_error: {ex}",
                 "coverage": 0,
                 "counts": {},
                 "findings": [],
                 "providers": {},
             }
-            return True
+            return False
 
     def _emit_security_report(
         self,
@@ -658,24 +671,79 @@ class UnifiedCLI:
 
                         if decision == "warn":
                             print(f"{Fore.YELLOW}[Security]{Style.RESET_ALL} Proceeding despite warning.")
+            except Exception as ex:
+                # Catch exceptions bubbling from a patched/broken _security_scan so
+                # _execute_with_security itself never raises — it just blocks the action.
+                print(
+                    f"{Fore.RED}[Security]{Style.RESET_ALL} Security scan FAILED "
+                    f"({ex}). Blocking action (use --no-security to override)."
+                )
+                self._last_security_scan = {
+                    "decision": "block",
+                    "reason": f"scan_error: {ex}",
+                    "coverage": 0,
+                    "counts": {},
+                    "findings": [],
+                    "providers": {},
+                }
+                return
             finally:
                 self._findings_display_limit = 0
 
-        # 2. Execute the manager operation
-        success = operation(package_name)
+        # 2. Capture pre-install snapshot for transitive dependency diffing.
+        before_snapshot: Dict[str, str] = {}
+        if action == "install":
+            before_snapshot = self._capture_package_snapshot(manager_name)
+
+        # 3. Execute the manager operation.
+        # TOCTOU fix: use the version-pinned specifier so the manager installs the
+        # exact release that was scanned, not a newer "latest" resolved at install time.
+        pinned_pkg = package_name
+        resolved_v = self._last_resolved_version
+        if resolved_v and action in ("install", "upgrade"):
+            # Strip any pre-existing version specifier from the user-supplied name
+            base_name = re.sub(r'(?<=.)[@=]=?\d[^\s]*$', '', package_name).strip()
+            if manager_name in {"npm", "yarn", "pnpm"}:
+                pinned_pkg = f"{base_name}@{resolved_v}"
+            elif manager_name == "pip3":
+                pinned_pkg = f"{base_name}=={resolved_v}"
+
+        success = operation(pinned_pkg)
 
         if success:
             print(
                 f"{Fore.GREEN}{_SYMBOL_OK} Successfully {action}ed {package_name} "
                 f"via {manager_name}{Style.RESET_ALL}"
             )
+            # 4. Transitive dependency scan: diff tree and rollback if any dep blocks.
+            if action == "install":
+                transitive_safe = self._scan_and_rollback_transitive(
+                    manager_name, before_snapshot, package_name
+                )
+                if not transitive_safe:
+                    # Rollback already executed inside the method; skip cache write.
+                    self._emit_security_report(
+                        action=action,
+                        package_name=package_name,
+                        manager_name=manager_name,
+                        operation_status="rolled_back_transitive",
+                        operation_success=False,
+                        scan_result=self._last_security_scan,
+                    )
+                    return
+
             # Record in the local package cache DB
             if action == "install":
                 self._cache_installed_package(package_name, manager_name)
+            elif action == "upgrade":
+                # Keep the DB version column current after a successful upgrade.
+                new_version = self._get_installed_version(package_name, manager_name) or ""
+                with PackageCacheDB() as db:
+                    db.update_package_version(package_name, new_version, manager_name)
         else:
             print(f"{Fore.RED}{_SYMBOL_FAIL} Failed to {action} {package_name}{Style.RESET_ALL}")
 
-        # 3. Update report with final outcome (overwrites pre-action report)
+        # 5. Update report with final outcome (overwrites pre-action report)
         self._emit_security_report(
             action=action,
             package_name=package_name,
@@ -684,6 +752,133 @@ class UnifiedCLI:
             operation_success=success,
             scan_result=self._last_security_scan,
         )
+
+    # ------------------------------------------------------------------
+    # Transitive dependency scanning (state-diff + rollback)
+    # ------------------------------------------------------------------
+
+    def _capture_package_snapshot(self, manager_name: str) -> Dict[str, str]:
+        """Return a {name_lower: version} dict of currently installed packages.
+
+        Called both before and after install so we can diff the two states and
+        discover every transitively introduced dependency.
+        """
+        manager = self.available_managers.get(manager_name)
+        if not manager:
+            return {}
+        try:
+            return {
+                str(p["name"]).lower(): str(p.get("version", ""))
+                for p in manager.list_packages()
+            }
+        except Exception:
+            return {}
+
+    def _scan_and_rollback_transitive(
+        self,
+        manager_name: str,
+        before_snapshot: Dict[str, str],
+        top_level_package: str,
+    ) -> bool:
+        """Scan all packages introduced since *before_snapshot* was taken.
+
+        Strategy (enterprise endpoint-detection pattern):
+          A. Diff pre-install and post-install package trees.
+          B. Skip the top-level package (already scanned before install).
+          C. Run SecurityAggregator over every newly introduced dependency.
+          D. If any dependency triggers BLOCK, uninstall everything that was
+             added and alert the user.
+
+        Returns True if all transitive deps are safe, False if rollback occurred.
+        """
+        after_snapshot = self._capture_package_snapshot(manager_name)
+
+        # Step A: find newly added packages
+        new_packages: List[Dict[str, str]] = []
+        top_base = top_level_package.lower().split("@")[0].split("==")[0].strip()
+        for name_lower, version in after_snapshot.items():
+            if name_lower not in before_snapshot:
+                if name_lower == top_base:
+                    continue  # top-level already scanned; skip
+                new_packages.append({"name": name_lower, "version": version})
+
+        if not new_packages:
+            return True
+
+        print(
+            f"\n{Fore.CYAN}[Transitive]{Style.RESET_ALL} "
+            f"Scanning {len(new_packages)} newly introduced dependency/dependencies..."
+        )
+
+        blocked: List[str] = []
+        for dep in new_packages:
+            dep_name = dep["name"]
+            dep_ver = dep.get("version") or None
+            print(
+                f"{Fore.CYAN}[Transitive]{Style.RESET_ALL} "
+                f"  Checking {dep_name} {dep_ver or '(unknown version)'}..."
+            )
+            try:
+                result = self.security_aggregator.analyze(
+                    package_name=dep_name,
+                    manager=manager_name,
+                    version=dep_ver,
+                    file_hash=None,
+                )
+                decision = str(result.get("decision", "allow")).lower()
+                if decision == "block":
+                    reason = result.get("reason", "no reason")
+                    print(
+                        f"{Fore.RED}[Transitive]{Style.RESET_ALL} "
+                        f"  BLOCK: {dep_name} — {reason}"
+                    )
+                    blocked.append(dep_name)
+                elif decision == "warn":
+                    print(
+                        f"{Fore.YELLOW}[Transitive]{Style.RESET_ALL} "
+                        f"  WARN: {dep_name} has medium/high findings."
+                    )
+            except Exception as ex:
+                print(
+                    f"{Fore.YELLOW}[Transitive]{Style.RESET_ALL} "
+                    f"  Scan error for {dep_name}: {ex}"
+                )
+
+        # Step D: rollback if any transitive dep is BLOCK
+        if blocked:
+            print(
+                f"\n{Fore.RED}[Transitive]{Style.RESET_ALL} "
+                f"CRITICAL: {len(blocked)} transitive dependency/dependencies blocked. "
+                "Initiating automatic rollback..."
+            )
+            manager = self.available_managers.get(manager_name)
+            if manager:
+                # Rollback top-level package first, then the blocked deps
+                all_to_remove = [top_level_package] + blocked
+                for pkg in all_to_remove:
+                    try:
+                        manager.uninstall_package(pkg)
+                        print(
+                            f"{Fore.YELLOW}[Transitive]{Style.RESET_ALL} "
+                            f"  Rolled back: {pkg}"
+                        )
+                    except Exception as ex:
+                        print(
+                            f"{Fore.RED}[Transitive]{Style.RESET_ALL} "
+                            f"  Rollback failed for {pkg}: {ex}"
+                        )
+            print(
+                f"{Fore.RED}[Transitive]{Style.RESET_ALL} "
+                "Rollback complete. Installation aborted due to unsafe transitive "
+                f"dependencies: {', '.join(blocked)}"
+            )
+            return False
+
+        print(
+            f"{Fore.GREEN}[Transitive]{Style.RESET_ALL} "
+            f"All {len(new_packages)} transitive dependency/dependencies passed security checks."
+        )
+        return True
 
     def _cache_installed_package(self, package_name: str, manager_name: str) -> None:
         """Write package info to the local SQLite cache."""
@@ -698,11 +893,8 @@ class UnifiedCLI:
                     break
         except Exception:
             pass
-        db = PackageCacheDB()
-        try:
+        with PackageCacheDB() as db:
             db.add_package(package_name, version, manager_name)
-        finally:
-            db.close()
 
     # ------------------------------------------------------------------
     # Public commands
@@ -962,6 +1154,10 @@ class UnifiedCLI:
                 f"{Fore.GREEN}{_SYMBOL_OK} Successfully uninstalled {package_name} "
                 f"via {resolved}{Style.RESET_ALL}"
             )
+            # Keep PackageCacheDB consistent: remove the entry so the DB reflects
+            # actual filesystem state rather than just accumulating stale records.
+            with PackageCacheDB() as db:
+                db.remove_package(package_name, resolved)
         else:
             print(f"{Fore.RED}{_SYMBOL_FAIL} Failed to uninstall {package_name}{Style.RESET_ALL}")
 
@@ -1101,13 +1297,24 @@ def _print_help() -> None:
         print(f"  {body}")
 
     print(f"{Fore.MAGENTA}Security Scanning:{Style.RESET_ALL}")
-    print("  • Downloads artifact to a temp directory and computes SHA-256.")
+    print("  • Resolves the exact package version BEFORE downloading the artifact")
+    print("    (TOCTOU-safe: the scanned hash and the installed release are always the same).")
+    print("  • Downloads the pinned artifact to a temp directory and computes SHA-256.")
     print("  • Aggregates OSV, GitHub Advisory, OSS Index, and VirusTotal.")
     print("  • Decision policy: critical/malicious → block, medium/high → warn, clean → allow.")
-    print("  • Retries, timeouts, rate-limit handling with fallback.")
-    print("  • JSON reports saved in security_reports/.")
-    print(f"  • Skip scanning with {Fore.YELLOW}--no-security{Style.RESET_ALL}.\n")
+    print("  • Fail-closed: if the scanner itself errors, the action is BLOCKED")
+    print(f"    (use {Fore.YELLOW}--no-security{Style.RESET_ALL} to override).")
+    print("  • Retries, timeouts, and rate-limit handling with exponential back-off.")
+    print("  • JSON + Markdown reports saved in security_reports/.")
+    print(f"  • Skip scanning with {Fore.YELLOW}--no-security{Style.RESET_ALL}.")
     print("  • Show findings in terminal with --show-findings or --show-findings N.\n")
+
+    print(f"{Fore.MAGENTA}Transitive Dependency Scanning:{Style.RESET_ALL}")
+    print("  • On install, a pre/post snapshot of installed packages is diffed.")
+    print("  • Every newly introduced transitive dependency is scanned automatically.")
+    print("  • If any transitive dependency is BLOCKED, the top-level package and all")
+    print("    new dependencies are automatically rolled back (uninstalled).")
+    print("  • Protects against supply-chain injection via malicious sub-dependencies.\n")
 
     print(f"{sep}")
     print(f"{Fore.GREEN}Supported Package Managers:{Style.RESET_ALL}")
@@ -1134,21 +1341,38 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Security Scanning:
-    Every install/upgrade checks packages against 4 security providers:
-    - OSV.dev (open-source vulnerability database)
-    - GitHub Advisory (GitHub-tracked CVEs)
-    - OSS Index (Sonatype intelligence)
-    - VirusTotal (file-hash malware reputation)
+    Every install/upgrade is protected by a multi-layer security pipeline:
+
+    1. VERSION PINNING (TOCTOU fix)
+       The exact registry version is resolved before artifact download.
+       The same pinned version is passed to the package manager at install time,
+       so the scanned artifact and the installed release are always identical.
+
+    2. MULTI-PROVIDER SCANNING
+       Packages are checked against 4 providers in parallel:
+       - OSV.dev          (open-source vulnerability database)
+       - GitHub Advisory  (GitHub-tracked CVEs and advisories)
+       - OSS Index        (Sonatype component intelligence)
+       - VirusTotal       (SHA-256 file-hash malware reputation)
+
+    3. TRANSITIVE DEPENDENCY SCANNING
+       After install, the package tree is diffed (before vs. after).
+       Every newly introduced transitive dependency is scanned automatically.
+       If any transitive dep is BLOCKED the entire install is rolled back.
+
+    4. FAIL-CLOSED POLICY
+       If the scanner itself errors, the action is BLOCKED by default.
+       Use --no-security to bypass scanning entirely.
 
     Decisions: BLOCK (critical/malicious), WARN (medium/high), ALLOW (clean)
-    Use --force to override BLOCK or skip WARN prompts (like pip-audit-style gates).
+    Use --force to override BLOCK or skip WARN prompts.
 
 Examples:
-    %(prog)s install requests -m pip3    # Install with security scan
-    %(prog)s upgrade flask --show-findings  # Show vulnerability findings
-    %(prog)s install lodash --no-security   # Skip security scan
-    %(prog)s upgrade --all --dry-run   # Audit all outdated packages (CI exit code)
-    %(prog)s list                        # List all packages
+    %(prog)s install requests -m pip3         # Install with full security pipeline
+    %(prog)s upgrade flask --show-findings    # Show vulnerability findings
+    %(prog)s install lodash --no-security     # Skip security scan
+    %(prog)s upgrade --all --dry-run          # Audit all outdated packages (CI gate)
+    %(prog)s list                             # List all installed packages
         """,
     )
 

@@ -51,13 +51,24 @@ def calculate_file_hash(file_path: str) -> str:
     return sha256_hash.hexdigest()
 
 
-def _download_pip_artifact(package_name: str, tmpdir: str) -> Optional[str]:
-    """Download pip artifact (no deps) and return hash."""
+def _download_pip_artifact(package_name: str, tmpdir: str, version: Optional[str] = None) -> Optional[str]:
+    """Download pip artifact (no deps) and return hash.
+
+    When *version* is supplied the download is pinned to that exact version
+    (``name==version``), eliminating the TOCTOU window between scan and install.
+    """
+    # Build the version-pinned specifier, e.g. "requests==2.31.0"
+    if version:
+        base = package_name.split("==")[0].split("@")[0].strip()
+        specifier = f"{base}=={version}"
+    else:
+        specifier = package_name
+
     # try pip3 first, fall back to python -m pip
-    cmd = ['pip3', 'download', '--no-deps', package_name, '-d', tmpdir]
+    cmd = ['pip3', 'download', '--no-deps', specifier, '-d', tmpdir]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        cmd2 = ['python', '-m', 'pip', 'download', '--no-deps', package_name, '-d', tmpdir]
+        cmd2 = ['python', '-m', 'pip', 'download', '--no-deps', specifier, '-d', tmpdir]
         result2 = subprocess.run(cmd2, capture_output=True, text=True)
         if result2.returncode != 0:
             return None
@@ -159,33 +170,48 @@ def _npm_pack_fallback(package_name: str, tmpdir: str) -> Optional[str]:
         return None
 
 
-def download_package_and_get_hash(package_name: str, manager: str) -> Optional[str]:
-    """Download package artifact and return SHA-256 (pip/npm/yarn/pnpm)."""
+def download_package_and_get_hash(
+    package_name: str,
+    manager: str,
+    version: Optional[str] = None,
+) -> Optional[str]:
+    """Download the **exact** package artifact and return its SHA-256 hash.
+
+    TOCTOU fix: when *version* is provided we download that specific release
+    rather than letting the registry resolve "latest" independently from what
+    the package manager will ultimately install.
+
+    Supported ecosystems: pip3, npm, yarn, pnpm.
+    """
     tmpdir = tempfile.mkdtemp(prefix="pkgscan_")
     try:
         if manager == 'pip3':
-            return _download_pip_artifact(package_name, tmpdir)
+            return _download_pip_artifact(package_name, tmpdir, version=version)
         if manager in {'npm', 'yarn', 'pnpm'}:
             registry = _get_npm_registry()
-            meta = _get_npm_metadata(package_name)
-            # Attempt direct dist.tarball if present in npm view
-            tarball_url = None
-            if isinstance(meta, dict):
-                dist_obj = meta.get('dist')
-                if isinstance(dist_obj, dict):
-                    dist_dict = cast(Dict[str, Any], dist_obj)
-                    t = dist_dict.get('tarball')
-                    if isinstance(t, str) and t:
-                        tarball_url = t
-            # If not found, query registry latest endpoint for tarball
-            if not tarball_url:
-                tarball_url = _get_npm_latest_tarball_from_registry(package_name, registry)
-            # If still not found, try constructing from version in meta
-            if not tarball_url and isinstance(meta, dict):
-                version = meta.get('version') if isinstance(meta.get('version'), str) else None
-                if version:
-                    tarball_url = _construct_npm_tarball_url(package_name, version, registry)
-            # Download tarball if URL is available
+            tarball_url: Optional[str] = None
+
+            # If we already know the exact version, build the URL directly
+            # without an extra registry round-trip — this is the TOCTOU-safe path.
+            if version:
+                tarball_url = _construct_npm_tarball_url(package_name, version, registry)
+            else:
+                # Fall back to the original discovery flow (scan-only path, no version pinned)
+                meta = _get_npm_metadata(package_name)
+                if isinstance(meta, dict):
+                    dist_obj = meta.get('dist')
+                    if isinstance(dist_obj, dict):
+                        dist_dict = cast(Dict[str, Any], dist_obj)
+                        t = dist_dict.get('tarball')
+                        if isinstance(t, str) and t:
+                            tarball_url = t
+                if not tarball_url:
+                    tarball_url = _get_npm_latest_tarball_from_registry(package_name, registry)
+                if not tarball_url and isinstance(meta, dict):
+                    v = meta.get('version') if isinstance(meta.get('version'), str) else None
+                    if v:
+                        tarball_url = _construct_npm_tarball_url(package_name, v, registry)
+
             if isinstance(tarball_url, str) and tarball_url:
                 hash_val = _download_npm_tarball(tarball_url, tmpdir, package_name)
                 if hash_val:

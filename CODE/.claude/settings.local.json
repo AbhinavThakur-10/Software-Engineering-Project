@@ -9,7 +9,14 @@
       "Bash(python experiments/scripts/analyze_timing.py)",
       "Bash(rm:*)",
       "Bash(venv/Scripts/pytest tests/ -v --tb=short)",
-      "Bash(pwsh -File experiments/run_security_detection.ps1)"
+      "Bash(pwsh -File experiments/run_security_detection.ps1)",
+      "Bash(python3:*)",
+      "Bash(python -m pytest tests/test_security_fixes.py tests/test_managers.py tests/test_cli_handlers.py -q)",
+      "Bash(python -c \"import matplotlib, numpy\")",
+      "Bash(pip install:*)",
+      "Bash(python plot_results.py)",
+      "Bash(python -c \"import packaging; print\\(packaging.__version__\\)\")",
+      "Bash(python -c ':*)"
     ]
   }
 }
