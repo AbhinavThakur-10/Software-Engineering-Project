@@ -7,7 +7,13 @@
       "Bash(python experiments/analyze_security.py \"experiments/security_raw_20260405_182622.csv\")",
       "Bash(python -c ':*)",
       "Bash(python experiments/analyze_security.py \"experiments/security_raw_20260405_183145.csv\")",
-      "Bash(python experiments/analyze_security.py \"experiments/security_raw_20260405_183926.csv\")"
+      "Bash(python experiments/analyze_security.py \"experiments/security_raw_20260405_183926.csv\")",
+      "Bash(python -m pytest tests/ -v -x -q)",
+      "Bash(python -m pytest tests/ -v -q)",
+      "Bash(python -m pytest tests/test_security_fixes.py -v)",
+      "Bash(python benchmark_results.py)",
+      "Bash(python -c \"from src.utils.security_aggregator import SecurityAggregator; from src.utils.virustotal import get_virustotal_api_key; print\\('imports ok'\\)\")",
+      "Bash(python:*)"
     ]
   }
 }

@@ -38,6 +38,32 @@ class PackageCacheDB:
         cur.execute('SELECT name, version, manager FROM installed_packages')
         return cur.fetchall()
 
+    def remove_package(self, name: str, manager: str) -> None:
+        """Remove a package record (called after a successful uninstall)."""
+        with self.conn:
+            self.conn.execute(
+                'DELETE FROM installed_packages WHERE name = ? AND manager = ?',
+                (name, manager),
+            )
+
+    def update_package_version(self, name: str, version: str, manager: str) -> None:
+        """Update the recorded version for an existing package (called after upgrade).
+
+        If the row does not yet exist it is inserted so the DB stays consistent
+        regardless of whether the package was originally installed through unified.
+        """
+        with self.conn:
+            # Remove any stale version rows for this package+manager first,
+            # then insert the new version — avoids UNIQUE constraint violations.
+            self.conn.execute(
+                'DELETE FROM installed_packages WHERE name = ? AND manager = ? AND version != ?',
+                (name, manager, version),
+            )
+            self.conn.execute(
+                'INSERT OR IGNORE INTO installed_packages (name, version, manager) VALUES (?, ?, ?)',
+                (name, version, manager),
+            )
+
     def close(self):
         self.conn.close()
 

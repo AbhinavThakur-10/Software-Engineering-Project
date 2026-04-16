@@ -85,11 +85,18 @@ class YarnManager(BasePackageManager):
             return False
 
     def upgrade_package(self, package_name: str) -> bool:
-        """Upgrade a yarn package globally."""
+        """Upgrade a yarn package globally (or install a specific version if specifier present)."""
         try:
+            # `yarn global upgrade` rejects version specifiers like `pkg@1.2.3`.
+            # When the caller passes a pinned specifier, use `yarn global add` instead.
+            has_version_specifier = (
+                (not package_name.startswith('@') and '@' in package_name)
+                or (package_name.startswith('@') and package_name.count('@') >= 2)
+            )
+            sub_cmd = 'add' if has_version_specifier else 'upgrade'
             print(f"Upgrading {package_name} via yarn...")
             result: subprocess.CompletedProcess[str] = self._run_command(
-                ['global', 'upgrade', package_name],
+                ['global', sub_cmd, package_name],
                 capture_output=False
             )
 

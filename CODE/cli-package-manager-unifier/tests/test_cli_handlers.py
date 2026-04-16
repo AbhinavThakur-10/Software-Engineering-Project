@@ -19,6 +19,11 @@ def cli(monkeypatch):
     # Stub security scan to always allow
     monkeypatch.setattr(instance, "_security_scan", lambda pkg, mgr, *a, **k: True)
     instance._last_security_scan = {"decision": "allow", "reason": "test", "coverage": 4, "counts": {}, "findings": [], "providers": {}}
+    # Auto-confirm all install/upgrade prompts introduced by the new always-prompt flow
+    monkeypatch.setattr("builtins.input", lambda *_: "y")
+    # Suppress disk writes and markdown prompt in unit tests
+    monkeypatch.setattr(instance, "_emit_security_report", lambda *a, **k: None)
+    monkeypatch.setattr(instance, "_offer_markdown_report_before_action", lambda *a, **k: None)
     return instance
 
 

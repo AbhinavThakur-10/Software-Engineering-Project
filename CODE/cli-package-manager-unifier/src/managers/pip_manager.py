@@ -1,7 +1,8 @@
 """Pip3 package manager implementation."""
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 import re
+import requests
 from .base_manager import BasePackageManager
 
 class PipManager(BasePackageManager):
@@ -192,6 +193,19 @@ class PipManager(BasePackageManager):
         except Exception as e:
             print(f"Error checking outdated pip packages: {e}")
             return []
+
+    def get_latest_registry_version(self, package_name: str) -> Optional[str]:
+        """Return the latest version of a pip package from PyPI."""
+        try:
+            response = requests.get(
+                f"https://pypi.org/pypi/{package_name}/json", timeout=10
+            )
+            if response.status_code == 200:
+                version = str(response.json().get("info", {}).get("version", "")).strip()
+                return version or None
+        except Exception:
+            pass
+        return None
 
     def show_package_info(self, package_name: str) -> Dict[str, str]:
         """
